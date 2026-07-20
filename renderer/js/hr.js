@@ -702,6 +702,117 @@ async function loadCustody(){
   </tr>`).join('');
 }
 async function deleteCustody(id){ if(!confirm('حذف؟'))return; await window.db.run('DELETE FROM custody WHERE id=?',[id]); loadCustody(); }
+async function returnCustody(id){
+  const today=new Date().toISOString().split('T')[0];
+  await window.db.run('UPDATE custody SET date_returned=? WHERE id=?',[today,id]);
+  showToast('تم تسجيل الاسترداد ','success');loadCustody();
+}
+
+// ─── Salary ───────────────────────────────────────────────────────────────────
+function loadSalaryMonths(){
+  const sel=document.getElementById('salaryMonth');
+  sel.innerHTML='';
+  const now=new Date();
+  for(let i=0;i<12;i++){
+    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    const val=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    const label=d.toLocaleDateString('ar-EG',{year:'numeric',month:'long'});
+    sel.innerHTML+=`<option value="${val}">${label}</option>`;
+  }
+}
+
+async function loadSalaryReport(){
+  const month=document.getElementById('salaryMonth').value;
+  if(!month) return;
+  const [year,mon]=month.split('-');
+  const empRes=await window.db.query('SELECT * FROM employees WHERE is_active=1 ORDER BY name',[]);
+  if(!empRes.success) return;
+
+  const tbody=document.getElementById('salaryBody');
+  let rows='';
+  for(const emp of empRes.data){
+    const advRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM advances WHERE employee_id=? AND strftime('%Y-%m',date)=? AND paid_back=0`,[emp.id,month]);
+    const dedRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM deductions WHERE employee_id=? AND strftime('%Y-%m',date)=?`,[emp.id,month]);
+    const incRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM incentives WHERE employee_id=? AND strftime('%Y-%m',date)=?`,[emp.id,month]);
+    const paidRes=await window.db.queryOne(`SELECT COALESCE(SUM(net_salary),0) as total_paid, COALESCE(SUM(total_advances),0) as paid_advances FROM salary_payments WHERE employee_id=? AND month=?`,[emp.id,month]);
+    
+    const commRes = await window.db.queryOne(`SELECT COALESCE(SUM(net_total), 0) as total_sales FROM invoices WHERE tailor_id=? AND strftime('%Y-%m', invoice_date)=?`, [emp.id, month]);
+    const returnsRes = await window.db.queryOne(`SELECT COALESCE(SUM(r.total_returned), 0) as total_returned FROM returns r JOIN invoices i ON r.original_invoice_id = i.id WHERE i.tailor_id=? AND strftime('%Y-%m', i.invoice_date)=?`, [emp.id, month]);
+    
+    const netSales = (commRes.data?.total_sales || 0) - (returnsRes.data?.total_returned || 0);
+    const commissionPercent = emp.commission_percent || 0;
+    const commission = Math.max(0, netSales) * (commissionPercent / 100);
+
+    // ─── حساب الراتب: يومية أم شهري ───────────────────────────────
+    let gross = 0;
+    let grossLabel = '';
+    const salaryType = emp.salary_type || 'ثابت';
+    let totalLateMin  = 0;
+    let totalExtraMin = 0;
+
+    if (salaryType === 'يومية') {
+      // عدد أيام الحضور الفعلية + دقائق التأخير والزيادة
+      const attRes = await window.db.queryOne(
+        `SELECT COUNT(DISTINCT date) as days, COALESCE(SUM(late_minutes),0) as late_min, COALESCE(SUM(extra_minutes),0) as extra_min FROM attendance WHERE employee_id=? AND strftime('%Y-%m', date)=?`,
+        [emp.id, month]
+      );
+      const daysWorked  = attRes.data?.days      || 0;
+      totalLateMin      = attRes.data?.late_min  || 0;
+      totalExtraMin     = attRes.data?.extra_min || 0;
+      const dailyRate   = emp.monthly_salary || 0;
+      gross = daysWorked * dailyRate;
+      grossLabel = `<small style="font-size:10px;color:gray;display:block;">${daysWorked} يوم × ${fmt(dailyRate)}</small>`;
+    } else {
+      gross = emp.monthly_salary || 0;
+      grossLabel = '';
+    }
+
+    // Leave Allowance (فقط للمرتب الشهري)
+    let leaveBonus = 0;
+    let leaveDeduction = 0;
+    if (salaryType !== 'يومية') {
+      const leavesRes = await window.db.queryOne(`SELECT COUNT(*) as count FROM leaves WHERE employee_id=? AND strftime('%Y-%m', leave_date)=?`, [emp.id, month]);
+      const takenLeaves = leavesRes.data?.count || 0;
+      const allowance = emp.monthly_leave_days != null ? emp.monthly_leave_days : 2;
+      const dayValue = gross / 30;
+      if (takenLeaves < allowance) {
+        leaveBonus = (allowance - takenLeaves) * dayValue;
+      } else if (takenLeaves > allowance) {
+        leaveDeduction = (takenLeaves - allowance) * dayValue;
+      }
+    }
+
+    const advances  = (advRes.data?.total||0) + (paidRes.data?.paid_advances || 0);
+    const manualDed = dedRes.data?.total||0;
+    const manualInc = incRes.data?.total||0;
+    
+    const ded = manualDed + leaveDeduction;
+    const inc = manualInc + leaveBonus;
+    
+    const totalDue  = gross + commission - advances - ded + inc;
+    const totalPaid = paidRes.data?.total_paid || 0;
+    const net  = totalDue - totalPaid;
+    const paid = net <= 0 && totalPaid > 0 && Math.abs(net) < 0.01;
+
+    // overtime label to show under gross
+    const overtimeSuffix = (salaryType === 'يومية' && (totalLateMin > 0 || totalExtraMin > 0))
+      ? `<small style="font-size:9px;display:block;color:var(--warning);">تأخير: ${totalLateMin} دق | إضافي: ${totalExtraMin} دق</small>`
+      : '';
+
+    rows+=`<tr class="${paid?'salary-row-highlight':''}">
+      <td style="font-weight:600;">${emp.name} ${salaryType==='يومية'?'<span class="badge badge-warning" style="font-size:9px;">يومية</span>':''}</td>
+      <td style="color:var(--accent);">${fmt(gross)}${grossLabel}${overtimeSuffix}</td>
+      <td style="color:#8b5cf6; font-weight:bold;">${fmt(commission)} ${commissionPercent > 0 ? `<small style="font-size:10px;color:gray;">(%${commissionPercent})</small>` : ''}</td>
+      <td style="color:var(--warning);">${fmt(advances)}</td>
+      <td style="color:var(--danger);">${fmt(ded)}</td>
+      <td style="color:var(--success);">${fmt(inc)}</td>
+      <td style="font-weight:700;font-size:15px; color:${net<0?'var(--danger)':'inherit'};" dir="ltr">${fmt(net)}</td>
+      <td>${paid?'<span class="badge badge-success">مُسدد بالكامل</span>':(totalPaid > 0 ? `<span class="badge badge-warning">مدفوع ${fmt(totalPaid)}</span>` : (net < 0 ? '<span class="badge badge-danger">مدين للشركة</span>' : '<span class="badge badge-warning">لم يُصرف</span>'))}</td>
+      <td>${(totalPaid > 0) ? `<button class="btn btn-sm btn-danger" onclick="reverseSalaryPayment(${emp.id},'${month}')">إلغاء الصرف</button>` : ((net <= 0) ? '' : `<button class="btn btn-sm btn-success" onclick="paySalary(${emp.id},'${emp.name}',${gross},${advances},${ded},${inc},${net},'${month}','${salaryType}',${emp.monthly_salary||0},${emp.work_hours_per_day||8},${totalLateMin},${totalExtraMin})">صرف الراتب</button>`)}</td>
+    </tr>`;
+  }
+  tbody.innerHTML = rows || '<tr><td colspan="9" class="table-empty">لا يوجد موظفون</td></tr>';
+}
 
 let pendingSalary = null;
 let _payEmpData   = {}; // extra employee data for overtime calc
