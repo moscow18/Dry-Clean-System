@@ -3,7 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { setupIpcHandlers, createBackup } = require('./database/db');
+const { setupIpcHandlers, createBackup, copyBackupToExternal } = require('./database/db');
 const { initWhatsApp, sendWhatsApp, disconnectWhatsApp, isReady, getCurrentQR, MESSAGES } = require('./whatsapp/whatsapp-service');
 const { setupActivationIpc, getActivationStatus } = require('./activation');
 
@@ -81,7 +81,11 @@ app.on('window-all-closed', () => {
 // ─── Quit flow IPC handlers ───────────────────────────────────────────────────
 ipcMain.on('quit-with-backup', () => {
   try {
-    createBackup('تلقائي عند الإغلاق');
+    const result = createBackup('تلقائي عند الإغلاق');
+    // نسخ فوري للمسار الخارجي لو كان محدد
+    if (result.success && result.data && result.data.filePath) {
+      copyBackupToExternal(result.data.filePath);
+    }
   } catch (e) {
     console.error('Backup on quit failed:', e);
   }
@@ -119,24 +123,22 @@ ipcMain.handle('window:requestFocus', () => {
 });
 
 // ─── Print IPC ─────────────────────────────────────────────────────────────────
-ipcMain.handle('print', (_, options) => {
-  if (!mainWindow) return;
-  
-  const defaultPageSize = { width: 210000, height: 297000 }; // A4 in microns
+ipcMain.handle('print', async (_, options) => {
+  if (!mainWindow) return false;
   
   const printOptions = {
-    silent: false,
+    silent: true,
     printBackground: true,
     color: false,
     margins: { marginType: 'none' },
     ...options
   };
 
-  if (!printOptions.pageSize) {
-    printOptions.pageSize = defaultPageSize;
-  }
-
-  mainWindow.webContents.print(printOptions);
+  return new Promise((resolve) => {
+    mainWindow.webContents.print(printOptions, (success, errorType) => {
+      resolve(success);
+    });
+  });
 });
 
 // ─── File Dialog IPC ───────────────────────────────────────────────────────────

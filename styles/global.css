@@ -940,19 +940,41 @@ tfoot td {
 
 /* ─── Print Styles — 80mm Thermal ───────────────────────────── */
 @media print {
-  * { margin: 0; padding: 0; }
-  body { background: white; color: black; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100% !important;
+    height: auto !important;
+    background: white !important;
+    overflow: visible !important;
+    position: static !important;
+    direction: ltr !important;  /* force LTR on body so content starts from left */
+  }
 
   .no-print, .sidebar, .app-header, .quick-footer { display: none !important; }
 
+  .receipt-print {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    direction: rtl !important;
+  }
+
   .receipt {
     width: 80mm;
+    max-width: 80mm;
     font-family: 'Cairo', monospace;
     font-size: 10px;
     color: black;
     direction: rtl;
-    margin: 0 auto;
-    padding: 4mm;
+    margin: 0 !important;
+    padding: 0mm !important;
+    box-sizing: border-box;
   }
 
   .receipt-logo {
@@ -1166,3 +1188,61 @@ table tbody tr:hover {
   background: rgba(224,82,82,0.18) !important;
 }
 
+/* ─── Ultra-Premium UX & Animations ───────────────────────────── */
+
+/* Smooth page load fade-in */
+@keyframes fadeInPage {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.content-area {
+  animation: fadeInPage 0.22s ease-out forwards;
+}
+
+/* Glassmorphism Sidebar Enhancement */
+.sidebar {
+  background: rgba(27, 42, 74, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 4px 0 24px rgba(0,0,0,0.06);
+}
+
+/* Ultra Smooth Sticky Table Headers */
+table th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--primary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background-color: rgba(27, 42, 74, 0.9) !important; /* Semi-transparent primary */
+  color: #fff !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* Subtle focus ring (no infinite pulse for UX perf) */
+.btn-success:focus, .btn-primary:focus {
+  box-shadow: 0 0 0 3px rgba(201,168,76,0.3);
+  outline: none;
+}
+
+/* Smooth Card Lift (no bounce) */
+.card, .stat-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.card:hover, .stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Advanced Modal Glassmorphism */
+.modal-overlay {
+  background: rgba(17, 29, 53, 0.4) !important;
+  backdrop-filter: blur(8px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(150%) !important;
+}
+.modal {
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.98) !important;
+}

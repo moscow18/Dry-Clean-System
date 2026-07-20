@@ -1,4 +1,4 @@
-﻿// ─── Clock ────────────────────────────────────────────────────────────────────
+// ─── Clock ────────────────────────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
   document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('ar-EG');
@@ -200,48 +200,78 @@ async function handleLogout() {
   window.electron.navigate('login.html');
 }
 
-// ─── Attendance (حضور / انصراف) ───────────────────────────────────────────────
+// ─── Attendance Modal Logic ───────────────────────────────────────────────────
 async function handleAttendance() {
-  const today = new Date().toISOString().split('T')[0];
-  const empId = currentUser.id;
-  if (!empId) { showToast('خطأ: لا يوجد مستخدم', 'error'); return; }
-  const res = await window.db.queryOne(
-    `SELECT * FROM attendance WHERE employee_id=? AND date=? ORDER BY id DESC LIMIT 1`,
-    [empId, today]
-  );
-  if (res.success && res.data && !res.data.check_out) {
-    showToast('تم تسجيل الحضور مسبقاً اليوم', 'info');
-  } else {
-    const now = new Date().toISOString();
-    await window.db.run(
-      `INSERT INTO attendance (employee_id, date, check_in) VALUES (?,?,?)`,
-      [empId, today, now]
-    );
-    showToast('تم تسجيل الحضور بنجاح ', 'success');
+  document.getElementById('attendanceModal').classList.add('open');
+  
+  // Set default date and time
+  const now = new Date();
+  document.getElementById('attDate').value = now.toISOString().split('T')[0];
+  document.getElementById('attTimeIn').value = now.toTimeString().substring(0, 5);
+  document.getElementById('attTimeOut').value = '';
+
+  // Load active employees
+  const sel = document.getElementById('attEmpSelect');
+  sel.innerHTML = '<option value="">-- اختر الموظف / الصنايعي --</option>';
+  const res = await window.db.query('SELECT id, name FROM employees WHERE is_active=1 ORDER BY name', []);
+  if (res.success) {
+    res.data.forEach(e => {
+      sel.innerHTML += `<option value="${e.id}">${e.name}</option>`;
+    });
   }
 }
 
-async function handleCheckout() {
-  const today = new Date().toISOString().split('T')[0];
-  const empId = currentUser.id;
-  if (!empId) { showToast('خطأ: لا يوجد مستخدم', 'error'); return; }
-  const res = await window.db.queryOne(
-    `SELECT * FROM attendance WHERE employee_id=? AND date=? AND check_out IS NULL ORDER BY id DESC LIMIT 1`,
-    [empId, today]
-  );
-  if (!res.success || !res.data) {
-    showToast('لا يوجد حضور مسجل لليوم', 'warning');
+async function saveDashboardAttendance() {
+  const empId = document.getElementById('attEmpSelect').value;
+  const date = document.getElementById('attDate').value;
+  const timeIn = document.getElementById('attTimeIn').value;
+  
+  if (!empId || !date || !timeIn) {
+    showToast('يجب اختيار الموظف وإدخال التاريخ ووقت الحضور', 'warning');
     return;
   }
-  const now = new Date();
   
-  // Get employee work hours
+  const dateTime = `${date}T${timeIn}:00`;
+  const currentShift = await window.shift.getCurrent();
+  const shiftId = currentShift?.id || null;
+
+  await window.db.run(
+    `INSERT INTO attendance (employee_id, date, check_in, shift_id) VALUES (?,?,?,?)`,
+    [empId, date, dateTime, shiftId]
+  );
+  showToast('تم تسجيل الحضور بنجاح', 'success');
+  closeModal('attendanceModal');
+}
+
+async function saveDashboardCheckout() {
+  const empId = document.getElementById('attEmpSelect').value;
+  const date = document.getElementById('attDate').value;
+  const timeOut = document.getElementById('attTimeOut').value;
+  
+  if (!empId || !date || !timeOut) {
+    showToast('يجب اختيار الموظف وإدخال التاريخ ووقت الانصراف', 'warning');
+    return;
+  }
+  
+  // Check if check in exists
+  const attRes = await window.db.queryOne(
+    `SELECT * FROM attendance WHERE employee_id=? AND date=? AND check_out IS NULL ORDER BY id DESC LIMIT 1`,
+    [empId, date]
+  );
+  if (!attRes.success || !attRes.data) {
+    showToast('لا يوجد حضور مسجل لليوم، لا يمكن تسجيل انصراف', 'warning');
+    return;
+  }
+
+  const dateTime = `${date}T${timeOut}:00`;
+  const outDate = new Date(dateTime);
+  const checkInTime = new Date(attRes.data.check_in);
+  
   const empRes = await window.db.queryOne('SELECT work_hours_per_day FROM employees WHERE id=?', [empId]);
   const workHours = empRes.data?.work_hours_per_day || 8;
   const requiredMinutes = Math.floor(workHours * 60);
 
-  const checkInTime = new Date(res.data.check_in);
-  const workedMinutes = Math.floor((now - checkInTime) / 60000);
+  const workedMinutes = Math.floor((outDate - checkInTime) / 60000);
   
   let lateMinutes = 0;
   let extraMinutes = 0;
@@ -252,12 +282,12 @@ async function handleCheckout() {
     extraMinutes = workedMinutes - requiredMinutes;
   }
 
-  const nowIso = now.toISOString();
   await window.db.run(
     `UPDATE attendance SET check_out=?, late_minutes=?, extra_minutes=? WHERE id=?`, 
-    [nowIso, lateMinutes, extraMinutes, res.data.id]
+    [dateTime, lateMinutes, extraMinutes, attRes.data.id]
   );
-  showToast('تم تسجيل الانصراف بنجاح ', 'success');
+  showToast('تم تسجيل الانصراف بنجاح', 'success');
+  closeModal('attendanceModal');
 }
 
 // ─── End Shift — Navigate to end-shift screen (cashier only) ────────────────────

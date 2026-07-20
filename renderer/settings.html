@@ -361,16 +361,90 @@
         <div class="set-section full-width" style="max-width:900px;">
           <div class="set-section-title">قوالب رسائل الواتساب</div>
           <div style="margin-bottom:20px; font-size:13px; color:var(--text-muted);">
-            تخصيص الرسائل التي تُرسل للعملاء تلقائياً. المتغيرات المتاحة للاستخدام في النص:<br>
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{customerName}</code> اسم العميل، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{invoiceNumber}</code> رقم الفاتورة،
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{shopName}</code> اسم المحل، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{total}</code>، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{paid}</code>، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{remaining}</code>، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{address}</code>، 
-            <code style="background:#eee;padding:2px 6px;border-radius:4px;color:#d97706;">{contactPhone}</code>
+            تخصيص الرسائل التي تُرسل للعملاء تلقائياً. استخدم المتغيرات أدناه داخل النص وسيتم استبدالها بالقيم الحقيقية تلقائياً.
           </div>
+
+          <!-- Variables Reference Panel -->
+          <div style="
+            background: linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02));
+            border: 1.5px solid rgba(245,158,11,0.25);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+          ">
+            <div style="font-weight:700; font-size:13px; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+              <span>📖</span> دليل المتغيرات — انسخ أي متغير وضعه في القالب
+            </div>
+
+            <!-- Row 1: Common variables -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px; color:var(--text-muted); font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;">متغيرات مشتركة في كل القوالب</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <span class="wa-var-chip" onclick="copyVarChip(this)" title="اسم العميل">{customerName}</span>
+                <span class="wa-var-chip" onclick="copyVarChip(this)" title="رقم الفاتورة">{invoiceNumber}</span>
+                <span class="wa-var-chip" onclick="copyVarChip(this)" title="اسم المحل">{shopName}</span>
+                <span class="wa-var-chip" onclick="copyVarChip(this)" title="عنوان المحل">{address}</span>
+                <span class="wa-var-chip" onclick="copyVarChip(this)" title="رقم هاتف التواصل">{contactPhone}</span>
+              </div>
+            </div>
+
+            <!-- Row 2: Invoice confirm variables -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px; color:#6366f1; font-weight:600; margin-bottom:6px;">تأكيد الفاتورة فقط</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="الإجمالي">{total}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="المبلغ المدفوع">{paid}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="المبلغ المتبقي">{remaining}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="تاريخ الفاتورة">{date}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="وقت الفاتورة">{time}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="اسم الفني/الخياط المنفذ">{tailorName}</span>
+              </div>
+            </div>
+
+            <!-- Row 3: Payment variables -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px; color:#22c55e; font-weight:600; margin-bottom:6px;">قوالب الدفع الجزئي والكامل</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <span class="wa-var-chip wa-var-chip--green" onclick="copyVarChip(this)" title="المبلغ المدفوع الآن في هذه الدفعة">{paidNow}</span>
+                <span class="wa-var-chip wa-var-chip--green" onclick="copyVarChip(this)" title="إجمالي المدفوع حتى الآن">{totalPaid}</span>
+                <span class="wa-var-chip wa-var-chip--green" onclick="copyVarChip(this)" title="المبلغ المتبقي">{remaining}</span>
+                <span class="wa-var-chip wa-var-chip--green" onclick="copyVarChip(this)" title="طريقة الدفع (نقدي/تحويل)">{paymentMethod}</span>
+                <span class="wa-var-chip wa-var-chip--green" onclick="copyVarChip(this)" title="المبلغ المدفوع">{paid}</span>
+              </div>
+            </div>
+
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">💡 اضغط على أي متغير لنسخه — ثم الصقه في مكانه في القالب</div>
+          </div>
+
+          <style>
+            .wa-var-chip {
+              display: inline-block;
+              background: rgba(245,158,11,0.12);
+              color: #d97706;
+              border: 1px solid rgba(245,158,11,0.3);
+              border-radius: 6px;
+              padding: 3px 10px;
+              font-size: 12px;
+              font-family: monospace;
+              cursor: pointer;
+              user-select: none;
+              transition: all 0.15s;
+            }
+            .wa-var-chip:hover { background: rgba(245,158,11,0.25); transform:scale(1.03); }
+            .wa-var-chip:active { transform:scale(0.97); }
+            .wa-var-chip--purple {
+              background: rgba(99,102,241,0.1);
+              color: #6366f1;
+              border-color: rgba(99,102,241,0.3);
+            }
+            .wa-var-chip--purple:hover { background: rgba(99,102,241,0.2); }
+            .wa-var-chip--green {
+              background: rgba(34,197,94,0.1);
+              color: #16a34a;
+              border-color: rgba(34,197,94,0.3);
+            }
+            .wa-var-chip--green:hover { background: rgba(34,197,94,0.2); }
+          </style>
 
           <div class="set-grid">
             <div class="set-group" style="grid-column: span 2;">
@@ -448,8 +522,51 @@
 
           <div style="display:flex;gap:12px;margin-bottom:24px;">
             <button class="btn btn-success btn-lg" onclick="createBackup()">
-              نسخة احتياطية الآن
+              💾 نسخة احتياطية الآن
             </button>
+          </div>
+
+          <!-- External Backup Path Card -->
+          <div id="externalBackupCard" style="
+            background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(99,102,241,0.03));
+            border: 1.5px solid rgba(99,102,241,0.25);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+          ">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+              <span style="font-size:22px;">🔒</span>
+              <div>
+                <div style="font-weight:700; font-size:14px; color:var(--text-primary);">النسخ الاحتياطي التلقائي خارج الـ C</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                  بعد كل نسخة احتياطية، يتم نسخ الملف تلقائياً في المسار الخارجي اللي تختاره (فلاشة — بارتشن D — مجلد أي مكان)
+                </div>
+              </div>
+            </div>
+            <div id="extPathDisplay" style="
+              background: var(--bg);
+              border: 1px solid var(--border);
+              border-radius: 8px;
+              padding: 10px 14px;
+              font-size: 13px;
+              font-family: monospace;
+              color: var(--text-muted);
+              margin-bottom: 12px;
+              min-height: 38px;
+              display:flex;
+              align-items:center;
+              gap:8px;
+            ">
+              <span id="extPathText" style="flex:1;">جارٍ التحميل...</span>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" id="extBrowseBtn" onclick="selectExternalBackupPath()">
+                📁 اختيار مجلد
+              </button>
+              <button class="btn btn-outline btn-sm" id="extClearBtn" onclick="clearExternalBackupPath()" style="display:none;">
+                ✕ إلغاء المسار
+              </button>
+            </div>
           </div>
 
           <div class="set-section-title" style="font-size:14px;border-bottom:1px solid var(--border);">

@@ -195,9 +195,36 @@
     /* Receipt Print */
     .receipt-print { display: none; }
     @media print {
-      body { background: #fff !important; padding: 0 !important; }
+      html {
+        width: 72mm !important;
+        min-height: 0 !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      body {
+        width: 72mm !important;
+        min-height: 0 !important;
+        height: auto !important;
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+      }
       body > *:not(.receipt-print) { display: none !important; }
-      .receipt-print { display: block !important; }
+      .receipt-print {
+        display: block !important;
+        position: fixed !important;
+        top: 0 !important;
+        right: 0 !important;
+        width: 72mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        direction: rtl !important;
+        overflow: visible !important;
+      }
+      @page { margin: 0; size: auto; }
     }
   </style>
 </head>
@@ -300,7 +327,7 @@ async function startShift() {
       
       const userName = document.getElementById('userName').textContent;
       const receiptHTML = `
-        <div style="width:80mm;font-family:'Cairo',monospace;font-size:12px;color:#000;direction:rtl;padding:4mm;">
+        <div style="width:68mm;margin:0 auto;box-sizing:border-box;font-family:'Cairo',monospace;font-size:12px;color:#000;direction:rtl;padding:2mm;">
           <div style="text-align:center;font-size:18px;font-weight:900;margin-bottom:4px;">بدء شيفت جديد</div>
           <div style="border-top:1px dashed #000;margin:5px 0;"></div>
           <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>رقم الشيفت:</span><span>${result.data.shiftId}</span></div>
@@ -311,7 +338,13 @@ async function startShift() {
         </div>
       `;
       document.getElementById('receiptPrint').innerHTML = receiptHTML;
-      try { await window.electron.print({ pageSize: { width: 80000, height: 297000 } }); } catch(e){}
+      // Wait a tick so DOM updates, then print
+      await new Promise(r => setTimeout(r, 120));
+      try { await window.electron.print(); } catch(e){}
+      // Restore dir after a safe delay
+      await new Promise(r => setTimeout(r, 500));
+      document.documentElement.setAttribute('dir', 'rtl');
+      document.documentElement.style.direction = '';
     }
 
     // Navigate to dashboard after short delay

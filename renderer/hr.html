@@ -141,9 +141,16 @@
               <input type="text" id="ne_phone" class="form-control" placeholder="01xxxxxxxxx" />
             </div>
           </div>
-          <div class="form-row cols-3 mb-3">
+          <div class="form-row cols-4 mb-3">
             <div class="form-group">
-              <label class="form-label">الراتب الشهري (جنيه)</label>
+              <label class="form-label">نظام الدفع</label>
+              <select id="ne_salary_type" class="form-control" onchange="document.getElementById('lblSalary').textContent = this.value === 'يومية' ? 'قيمة اليومية (جنيه)' : 'الراتب الشهري (جنيه)'">
+                <option value="ثابت">راتب شهري</option>
+                <option value="يومية">يومية</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" id="lblSalary">الراتب الشهري (جنيه)</label>
               <input type="number" id="ne_salary" class="form-control" placeholder="0" />
             </div>
             <div class="form-group">
@@ -208,45 +215,71 @@
 
       <!-- ── Attendance ──────────────────────────────────────────────────── -->
       <div class="section" id="section-attendance">
+
+        <!-- كارت تسجيل الحضور -->
         <div class="card mb-4">
-          <div class="card-header"><div class="card-title">تسجيل حضور / انصراف</div></div>
+          <div class="card-header"><div class="card-title">🟢 تسجيل حضور</div></div>
           <div class="form-row cols-3">
             <div class="form-group">
               <label class="form-label">الموظف *</label>
-              <select id="att_emp" class="form-control"></select>
+              <select id="att_emp" class="form-control" onchange="onAttEmpChange()"></select>
             </div>
             <div class="form-group">
-              <label class="form-label">تاريخ</label>
-              <input type="date" id="att_date" class="form-control" />
+              <label class="form-label">تاريخ الحضور</label>
+              <input type="date" id="att_date" class="form-control" onchange="onAttEmpChange()" />
             </div>
             <div class="form-group">
-              <label class="form-label">وقت الحضور</label>
+              <label class="form-label">وقت الحضور *</label>
               <input type="time" id="att_checkin" class="form-control" />
+            </div>
+          </div>
+          <div class="flex gap-3 mt-3">
+            <button class="btn btn-success" onclick="saveAttendance()">✅ تسجيل حضور</button>
+          </div>
+        </div>
+
+        <!-- كارت تسجيل الانصراف -->
+        <div class="card mb-4">
+          <div class="card-header"><div class="card-title">🔴 تسجيل انصراف</div></div>
+          <div class="form-row cols-3">
+            <div class="form-group">
+              <label class="form-label">الموظف *</label>
+              <select id="co_emp" class="form-control" onchange="onCoEmpChange()"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">التاريخ</label>
+              <input type="date" id="co_date" class="form-control" onchange="onCoEmpChange()" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">وقت الحضور المسجل</label>
+              <input type="text" id="co_checkin_display" class="form-control" readonly style="background:var(--bg);color:var(--text-muted);font-weight:700;" placeholder="— اختر الموظف والتاريخ —" />
             </div>
           </div>
           <div class="form-row cols-3 mt-3">
             <div class="form-group">
-              <label class="form-label">وقت الانصراف</label>
-              <input type="time" id="att_checkout" class="form-control" />
+              <label class="form-label">وقت الانصراف *</label>
+              <input type="time" id="co_checkout" class="form-control" />
             </div>
             <div class="form-group">
               <label class="form-label">دقائق التأخير</label>
-              <input type="number" id="att_late" class="form-control" placeholder="0" value="0" />
+              <input type="number" id="co_late" class="form-control" placeholder="يُحسب تلقائياً" value="0" />
             </div>
             <div class="form-group">
               <label class="form-label">دقائق زيادة</label>
-              <input type="number" id="att_extra" class="form-control" placeholder="0" value="0" />
+              <input type="number" id="co_extra" class="form-control" placeholder="يُحسب تلقائياً" value="0" />
             </div>
           </div>
+          <div id="co_summary" style="display:none;margin-top:10px;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;"></div>
           <div class="flex gap-3 mt-3">
-            <button class="btn btn-success" onclick="saveAttendance()">حفظ الحضور</button>
-            <button class="btn btn-warning" onclick="saveCheckout()">تسجيل انصراف</button>
+            <button class="btn btn-warning" onclick="saveCheckout()">🚪 تسجيل انصراف</button>
           </div>
         </div>
+
+        <!-- جدول السجلات -->
         <div class="table-wrapper">
           <table>
-            <thead><tr><th>الموظف</th><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>تأخير (دق)</th><th>زيادة (دق)</th></tr></thead>
-            <tbody id="attendanceBody"><tr><td colspan="6" class="table-empty">لا توجد سجلات</td></tr></tbody>
+            <thead><tr><th>الموظف</th><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>تأخير (دق)</th><th>زيادة (دق)</th><th>حذف</th></tr></thead>
+            <tbody id="attendanceBody"><tr><td colspan="7" class="table-empty">لا توجد سجلات</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -491,6 +524,31 @@
     <div class="modal-header"><div class="modal-title">صرف راتب</div><button class="modal-close" onclick="closeModal('salaryConfirmModal')">✕</button></div>
     <div class="modal-body" id="salaryConfirmBody">
       <div id="salaryPaySummary" style="text-align:center;margin-bottom:14px;"></div>
+
+      <!-- قسم التأخير والزيادة (يظهر فقط لليومية) -->
+      <div id="overtime_section" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;">⏱️ ساعات الحضور والتأخير</div>
+        <div class="form-row cols-2 mb-2">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" style="font-size:11px;">قيمة الساعة (جنيه)</label>
+            <input type="number" id="pay_hourly_rate" class="form-control" min="0" step="0.01" oninput="recalcOvertimeDue()" />
+          </div>
+          <div></div>
+        </div>
+        <div class="form-group mb-2" id="late_row" style="display:none;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="pay_deduct_late" onchange="recalcOvertimeDue()" style="width:16px;height:16px;" />
+            <span>خصم تأخير: <strong id="pay_late_label">0</strong> دقيقة = <strong id="pay_late_val">0</strong> جنيه</span>
+          </label>
+        </div>
+        <div class="form-group mb-0" id="extra_row" style="display:none;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" id="pay_add_extra" onchange="recalcOvertimeDue()" style="width:16px;height:16px;" />
+            <span>صرف زيادة: <strong id="pay_extra_label">0</strong> دقيقة = <strong id="pay_extra_val">0</strong> جنيه</span>
+          </label>
+        </div>
+      </div>
+
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:right;">
         <div class="form-group mb-3">
           <label class="form-label">المبلغ المراد صرفه (جنيه)</label>

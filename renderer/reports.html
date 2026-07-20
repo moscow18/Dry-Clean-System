@@ -82,6 +82,41 @@
     
     .table-container { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
     .table-container > .table-wrapper { flex: 1; border: none; border-radius: 0; }
+    
+    /* Receipt Print */
+    .receipt-print { display: none; }
+    @media print {
+      html {
+        width: 72mm !important;
+        min-height: 0 !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      body {
+        width: 72mm !important;
+        min-height: 0 !important;
+        height: auto !important;
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+      }
+      body > *:not(.receipt-print) { display: none !important; }
+      .receipt-print {
+        display: block !important;
+        position: fixed !important;
+        top: 0 !important;
+        right: 0 !important;
+        width: 72mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        direction: rtl !important;
+        overflow: visible !important;
+      }
+      @page { margin: 0; size: auto; }
+    }
   </style>
 </head>
 <body>
@@ -369,6 +404,7 @@
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
+<div class="receipt-print" id="receiptPrint" style="display:none;"></div>
 
 <script src="js/shared/common.js"></script>
 <script src="js/reports.js"></script>

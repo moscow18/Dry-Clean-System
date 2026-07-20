@@ -26,8 +26,14 @@ function getDb(app) {
   const dbPath = path.join(userDataPath, 'el-tarzy.db');
 
   db = new Database(dbPath, { verbose: null });
+  
+  // ─── Core & High-Performance Pragmas ───
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  db.pragma('synchronous = NORMAL');     // Faster writes in WAL mode
+  db.pragma('cache_size = -64000');      // 64MB Cache (negative = KB)
+  db.pragma('temp_store = MEMORY');      // Use memory for temporary tables
+  db.pragma('mmap_size = 300000000');    // Memory-mapped I/O (~300MB)
 
   migrateSchema();
   initSchema();
@@ -39,6 +45,34 @@ function getDb(app) {
 function getDbPath() {
   if (!appRef) return null;
   return path.join(appRef.getPath('userData'), 'el-tarzy.db');
+}
+
+// ─── External Backup Path (حفظ مسار النسخ الخارجية) ─────────────────────────
+function getExternalBackupSettingsPath() {
+  if (!appRef) return null;
+  return path.join(appRef.getPath('userData'), 'external-backup.json');
+}
+
+function getExternalBackupPath() {
+  try {
+    const p = getExternalBackupSettingsPath();
+    if (!p || !fs.existsSync(p)) return null;
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return data.externalBackupDir || null;
+  } catch {
+    return null;
+  }
+}
+
+function setExternalBackupPath(dir) {
+  try {
+    const p = getExternalBackupSettingsPath();
+    if (!p) return { success: false, error: 'لم يتم تهيئة التطبيق' };
+    fs.writeFileSync(p, JSON.stringify({ externalBackupDir: dir }), 'utf8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }
 
 function migrateSchema() {
@@ -131,6 +165,20 @@ function migrateSchema() {
       version: 9,
       run: () => {
         runSafe("UPDATE expenses SET payment_source = 'الخزينة' WHERE payment_source = 'خزينة'");
+      }
+    },
+    {
+      version: 10,
+      run: () => {
+        // High Performance Indexes
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoices_shift_id ON invoices(shift_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoices_employee_id ON invoices(employee_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice_id ON invoice_items(invoice_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_returns_shift_id ON returns(shift_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_expenses_shift_id ON expenses(shift_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_attendance_shift_id ON attendance(shift_id)");
       }
     }
   ];
@@ -530,6 +578,22 @@ function createBackup(backupType = 'يدوي', customDir = null) {
   }
 }
 
+// ─── Copy latest backup to external path ────────────────────────────────────
+function copyBackupToExternal(srcFilePath) {
+  try {
+    const extDir = getExternalBackupPath();
+    if (!extDir) return; // No external path configured
+    if (!fs.existsSync(extDir)) {
+      fs.mkdirSync(extDir, { recursive: true });
+    }
+    const destFile = path.join(extDir, path.basename(srcFilePath));
+    fs.copyFileSync(srcFilePath, destFile);
+    console.log('[Backup] Copied to external path:', destFile);
+  } catch (err) {
+    console.error('[Backup] Failed to copy to external path:', err.message);
+  }
+}
+
 function listBackups() {
   try {
     const rows = db.prepare('SELECT * FROM backups ORDER BY created_at DESC').all();
@@ -704,7 +768,20 @@ function setupIpcHandlers(ipcMain, app) {
   ipcMain.handle('db:saveInvoice', (_, invoiceData, items) => {
     try {
       const saveInvoiceTx = db.transaction(() => {
-        const invNum = invoiceData.invoiceNumber ? invoiceData.invoiceNumber : generateInvoiceNumber();
+        let invNum;
+        if (invoiceData.invoiceNumber) {
+          // Check if this number already exists in DB
+          const existing = db.prepare('SELECT id FROM invoices WHERE invoice_number = ?').get(invoiceData.invoiceNumber);
+          if (existing) {
+            // Already used → generate fresh number
+            invNum = generateInvoiceNumber();
+          } else {
+            // Not used → use it as-is (don't increment counter again)
+            invNum = invoiceData.invoiceNumber;
+          }
+        } else {
+          invNum = generateInvoiceNumber();
+        }
         const invStmt = db.prepare(`
           INSERT INTO invoices (invoice_number, customer_id, employee_id, tailor_id, invoice_date,
             payment_method, invoice_type, treasury_type, subtotal, discount_percent,
@@ -1165,10 +1242,27 @@ function setupIpcHandlers(ipcMain, app) {
   // ─── Backup ───────────────────────────────────────────────────────────────
   ipcMain.handle('backup:create', (_, backupType) => {
     try {
-      return createBackup(backupType || 'يدوي');
+      const result = createBackup(backupType || 'يدوي');
+      // Copy to external path if configured
+      if (result.success && result.data && result.data.filePath) {
+        setTimeout(() => copyBackupToExternal(result.data.filePath), 2000);
+      }
+      return result;
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  ipcMain.handle('backup:getExternalPath', () => {
+    return { success: true, data: getExternalBackupPath() };
+  });
+
+  ipcMain.handle('backup:setExternalPath', (_, dir) => {
+    return setExternalBackupPath(dir);
+  });
+
+  ipcMain.handle('backup:clearExternalPath', () => {
+    return setExternalBackupPath(null);
   });
 
   ipcMain.handle('backup:list', () => {
@@ -1236,4 +1330,4 @@ function setupIpcHandlers(ipcMain, app) {
   });
 }
 
-module.exports = { getDb, setupIpcHandlers, generateInvoiceNumber, addTreasuryEntry, getTreasuryBalance, createBackup };
+module.exports = { getDb, setupIpcHandlers, generateInvoiceNumber, addTreasuryEntry, getTreasuryBalance, createBackup, copyBackupToExternal, getExternalBackupPath };

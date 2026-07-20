@@ -1,4 +1,4 @@
-﻿let posAllInvoices = [];
+let posAllInvoices = [];
 
 function renderPosHistory(invoices) {
   const tbody = document.getElementById('historyTableBody');
@@ -112,7 +112,7 @@ function openSuspendedModal() {
 }
 
 
-function resumeSuspended(id) {
+async function resumeSuspended(id) {
   const suspended = JSON.parse(localStorage.getItem('suspendedInvoices') || '[]');
   const invIndex = suspended.findIndex(i => i.id === id);
   if (invIndex === -1) return;
@@ -136,11 +136,23 @@ function resumeSuspended(id) {
   document.getElementById('amountPaid').value = inv.amountPaid || '0';
   document.getElementById('invoiceNotes').value = inv.notes || '';
   
-  // Fix 1: Restore original invoice number
+  // Fix: Restore original invoice number only if it doesn't already exist in the DB
   if (inv.invoiceNumber) {
-    window._resumedInvoiceNumber = inv.invoiceNumber;
-    currentInvoiceNumber = inv.invoiceNumber;
-    document.getElementById('invoiceNumberDisplay').textContent = inv.invoiceNumber;
+    // Check if this number was already used (saved) in the database
+    const checkRes = await window.db.queryOne('SELECT id FROM invoices WHERE invoice_number = ?', [inv.invoiceNumber]);
+    if (checkRes.data) {
+      // Number already saved → get a fresh number
+      const freshRes = await window.db.generateInvoiceNumber();
+      const freshNum = freshRes.success ? freshRes.data : inv.invoiceNumber;
+      window._resumedInvoiceNumber = null;
+      currentInvoiceNumber = freshNum;
+      document.getElementById('invoiceNumberDisplay').textContent = freshNum;
+    } else {
+      // Number not used → restore it safely
+      window._resumedInvoiceNumber = inv.invoiceNumber;
+      currentInvoiceNumber = inv.invoiceNumber;
+      document.getElementById('invoiceNumberDisplay').textContent = inv.invoiceNumber;
+    }
   }
   
   renderItemsTable();
@@ -743,15 +755,14 @@ function buildReceiptHTML(inv) {
 
   const receiptContent = `
     <div class="receipt" style="
-      width:100%;
-      max-width:80mm;
+      width:68mm;
       box-sizing:border-box;
       font-family:'Cairo',Arial,sans-serif;
       font-size:11px;
       font-weight:700;
       color:#000;
       direction:rtl;
-      padding:3mm 2mm;
+      padding:2mm;
       margin:0 auto;
       -webkit-print-color-adjust:exact;
       print-color-adjust:exact;
@@ -777,11 +788,11 @@ function buildReceiptHTML(inv) {
           <col style="width:22%;">
         </colgroup>
         <thead><tr style="border-bottom:2px solid #000;">
-          <th style="text-align:right;padding:3px 2px;font-weight:900;background:transparent;">#</th>
-          <th style="text-align:right;padding:3px 2px;font-weight:900;background:transparent;">الصنف</th>
-          <th style="text-align:center;padding:3px 2px;font-weight:900;background:transparent;">كمية</th>
-          <th style="text-align:center;padding:3px 2px;font-weight:900;background:transparent;">السعر</th>
-          <th style="text-align:center;padding:3px 2px;font-weight:900;background:transparent;">الإجمالي</th>
+          <th style="text-align:right;padding:3px 2px;font-weight:900;background:#fff !important;color:#000 !important;">#</th>
+          <th style="text-align:right;padding:3px 2px;font-weight:900;background:#fff !important;color:#000 !important;">الصنف</th>
+          <th style="text-align:center;padding:3px 2px;font-weight:900;background:#fff !important;color:#000 !important;">كمية</th>
+          <th style="text-align:center;padding:3px 2px;font-weight:900;background:#fff !important;color:#000 !important;">السعر</th>
+          <th style="text-align:center;padding:3px 2px;font-weight:900;background:#fff !important;color:#000 !important;">الإجمالي</th>
         </tr></thead>
         <tbody>${itemsRows}</tbody>
       </table>
@@ -848,7 +859,7 @@ function printReceipt(withWhatsApp = false) {
     
     Swal.fire({
       title: 'معاينة الطباعة',
-      html: `<div style="display:flex;justify-content:center;max-height:400px;overflow-y:auto;background:#fff;padding:10px;border:1px solid #ddd;border-radius:8px;">${receiptHTML}</div>`,
+      html: `<div style="display:flex;justify-content:center;max-height:400px;overflow-y:auto;background:#fff;padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:80mm;margin:0 auto;">${receiptHTML}</div>`,
       showCancelButton: true,
       confirmButtonText: 'طباعة الآن',
       cancelButtonText: 'إلغاء',
@@ -858,7 +869,9 @@ function printReceipt(withWhatsApp = false) {
     }).then(async (result) => {
       if (result.isConfirmed) {
         document.getElementById('receiptPrint').innerHTML = receiptHTML;
-        window.electron.print({ pageSize: { width: 80000, height: 297000 } });
+        await new Promise(r => setTimeout(r, 120));
+        await window.electron.print();
+        await new Promise(r => setTimeout(r, 500));
       }
       if (withWhatsApp) {
         await sendWhatsApp();

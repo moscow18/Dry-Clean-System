@@ -1,4 +1,4 @@
-﻿let currentLogoPath = null;
+let currentLogoPath = null;
 
 
 // ─── Section navigation ──────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ function showSection(name) {
   event.target.closest('.sidebar-nav-item')?.classList.add('active');
 
   if (name === 'users')        loadUsers();
-  if (name === 'backup')       loadBackups();
+  if (name === 'backup')       { loadBackups(); loadExternalBackupPath(); }
   if (name === 'whatsapp')     checkWaStatus();
   if (name === 'wa-templates') loadWaTemplates();
 }
@@ -74,7 +74,7 @@ async function loadWaTemplates() {
   const s = res.data;
   
   // Default values if empty
-  const d_inv = `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\n\nفي انتظار إطلالتك الجديدة 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
+  const d_inv = `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالفني المنفذ: {tailorName}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع للتصاليح: 48 ساعة من تاريخ الفاتورة\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
   const d_rdy = `أهلاً {customerName} 🤍\n\nشغلك جاهز عندنا في {shopName} ✂️\nتم تجهيز طلبك بفاتورة رقم {invoiceNumber} وفي انتظار استلامك في أقرب فرصة.\nنتمنى نكون عند حسن ظنك 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
   const d_del = `أهلاً {customerName} 🤍\n\nشكراً لاستلامك طلبك من {shopName} ✂️\nفاتورة رقم {invoiceNumber} — تم التسليم بنجاح ✅\n\nنتشرف بخدمتك دايماً وفي انتظار إطلالتك القادمة 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
   const d_full= `أهلاً {customerName} 🤍\n\nتم استلام دفعتك، وفاتورتك رقم {invoiceNumber} مسددة بالكامل ✅\n💵 المبلغ المدفوع: {paid} جنيه\n\nشكرًا لثقتك في {shopName} 🤍 نتشرف بزيارتك دايمًا\n📞 {contactPhone}`;
@@ -373,6 +373,78 @@ async function factoryReset() {
   }
 }
 
+// ─── External Backup Path ─────────────────────────────────────────────────────
+async function loadExternalBackupPath() {
+  const res = await window.backup.getExternalPath();
+  const pathText = document.getElementById('extPathText');
+  const clearBtn = document.getElementById('extClearBtn');
+  const display  = document.getElementById('extPathDisplay');
+
+  if (res.success && res.data) {
+    pathText.textContent = res.data;
+    pathText.style.color = 'var(--success, #22c55e)';
+    display.style.borderColor = 'rgba(34,197,94,0.35)';
+    clearBtn.style.display = '';
+  } else {
+    pathText.textContent = 'لم يتم تحديد مسار بعد — النسخ الاحتياطي يحفظ داخل الـ C فقط';
+    pathText.style.color = 'var(--text-muted)';
+    display.style.borderColor = '';
+    clearBtn.style.display = 'none';
+  }
+}
+
+async function selectExternalBackupPath() {
+  const result = await window.electron.showOpenDialog({
+    title: 'اختر المجلد الذي ستُحفظ فيه النسخ الاحتياطية تلقائياً',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+
+  if (result.canceled || !result.filePaths || !result.filePaths.length) return;
+
+  const selectedDir = result.filePaths[0];
+  const res = await window.backup.setExternalPath(selectedDir);
+  if (res.success) {
+    showToast('✅ تم تحديد المسار: ' + selectedDir, 'success');
+    loadExternalBackupPath();
+  } else {
+    showToast('خطأ في حفظ المسار: ' + res.error, 'error');
+  }
+}
+
+async function clearExternalBackupPath() {
+  if (!confirm('هل تريد إلغاء المسار الخارجي؟\nسيتوقف النسخ التلقائي خارج الجهاز.')) return;
+  const res = await window.backup.clearExternalPath();
+  if (res.success) {
+    showToast('تم إلغاء المسار الخارجي', 'info');
+    loadExternalBackupPath();
+  } else {
+    showToast('خطأ: ' + res.error, 'error');
+  }
+}
+
+// ─── Copy variable chip to clipboard ─────────────────────────────────────────
+function copyVarChip(el) {
+  const text = el.textContent.trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const original = el.textContent;
+    el.textContent = '✓ تم النسخ';
+    el.style.opacity = '0.7';
+    setTimeout(() => {
+      el.textContent = original;
+      el.style.opacity = '';
+    }, 1200);
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('تم نسخ: ' + text, 'success');
+  });
+}
+
 // ─── Quit handler ─────────────────────────────────────────────────────────────
 window.electron.onConfirmBackupBeforeQuit(() => {
   document.getElementById('quitModal').classList.add('open');
@@ -526,6 +598,7 @@ window.whatsapp.onError((msg) => {
   showToast('خطأ في واتساب: ' + msg, 'error');
   const text = document.getElementById('waStatusText');
   const hint = document.getElementById('waStatusHint');
-  if (text) text.textContent = '⚠️ حدث خطأ في الواتساب';
-  if (hint) hint.textContent = 'اضغط تحديث أو أعد تشغيل البرنامج. ' + msg;
+  if (text) text.textContent = '⚠️ حدث خطأ — الواتساب متوقف';
+  if (hint) hint.innerHTML = `<span style="color:var(--danger);font-weight:600;">⛔ ${msg}</span><br><small>حاول إعادة تشغيل البرنامج. إذا استمرت المشكلة على ويندوز 7، تأكد من تحديث Google Chrome أو تثبيته.</small>`;
+  stopWaPolling();
 });

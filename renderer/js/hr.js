@@ -22,7 +22,14 @@ function showSection(name){
   
   if (!window.hrCache[name]) {
     if(name==='employees') loadEmployees();
-    if(name==='attendance'){ populateEmpSelect('att_emp'); loadAttendance(); document.getElementById('att_date').value=new Date().toISOString().split('T')[0]; }
+    if(name==='attendance'){
+      populateEmpSelect('att_emp');
+      populateEmpSelect('co_emp');
+      loadAttendance();
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('att_date').value = today;
+      document.getElementById('co_date').value  = today;
+    }
     if(name==='leaves'){ populateEmpSelect('lv_emp'); loadLeaves(); document.getElementById('lv_date').value=new Date().toISOString().split('T')[0]; }
     if(name==='advances'){ populateEmpSelect('adv_emp'); loadAdvances(); }
     if(name==='deductions'){ populateEmpSelect('ded_emp'); loadDeductions(); }
@@ -108,19 +115,21 @@ async function saveEmployee(){
       editingEmployeeId
     ];
     // إذا أدخل كلمة مرور جديدة نحدّثها، وإلا نتركها كما هي
+    const salaryType=document.getElementById('ne_salary_type')?.value||'ثابت';
     let sql, params;
     if(password){
-      sql=`UPDATE employees SET name=?,age=?,phone=?,monthly_salary=?,work_hours_per_day=?,job_title=?,hire_date=?,employee_type=?,username=?,password=?,is_active=?,commission_percent=?,monthly_leave_days=? WHERE id=?`;
-      params=[...data.slice(0,9), password, ...data.slice(9)];
+      sql=`UPDATE employees SET name=?,age=?,phone=?,monthly_salary=?,work_hours_per_day=?,job_title=?,hire_date=?,employee_type=?,username=?,password=?,is_active=?,commission_percent=?,monthly_leave_days=?,salary_type=? WHERE id=?`;
+      params=[...data.slice(0,9), password, ...data.slice(9,-1), salaryType, editingEmployeeId];
     } else {
-      sql=`UPDATE employees SET name=?,age=?,phone=?,monthly_salary=?,work_hours_per_day=?,job_title=?,hire_date=?,employee_type=?,username=?,is_active=?,commission_percent=?,monthly_leave_days=? WHERE id=?`;
-      params=data;
+      sql=`UPDATE employees SET name=?,age=?,phone=?,monthly_salary=?,work_hours_per_day=?,job_title=?,hire_date=?,employee_type=?,username=?,is_active=?,commission_percent=?,monthly_leave_days=?,salary_type=? WHERE id=?`;
+      params=[...data.slice(0,-1), salaryType, editingEmployeeId];
     }
     const res=await window.db.run(sql,params);
     if(res.success){showToast('تم تعديل بيانات الموظف بنجاح ✏️','success');clearNewEmployee();showSection('employees');}
     else showToast('خطأ في التعديل: '+res.error,'error');
   } else {
     // ── وضع الإضافة ──
+    const salaryType=document.getElementById('ne_salary_type')?.value||'ثابت';
     const data=[name,parseInt(document.getElementById('ne_age').value)||null,
       document.getElementById('ne_phone').value.trim(),
       parseFloat(document.getElementById('ne_salary').value)||0,
@@ -132,9 +141,10 @@ async function saveEmployee(){
       password,
       isActive,
       parseFloat(document.getElementById('ne_commission').value)||0,
-      leaveDays];
+      leaveDays,
+      salaryType];
     const res=await window.db.run(
-      `INSERT INTO employees (name,age,phone,monthly_salary,work_hours_per_day,job_title,hire_date,employee_type,username,password,is_active,commission_percent,monthly_leave_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,data);
+      `INSERT INTO employees (name,age,phone,monthly_salary,work_hours_per_day,job_title,hire_date,employee_type,username,password,is_active,commission_percent,monthly_leave_days,salary_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,data);
     if(res.success){showToast('تم إضافة الموظف بنجاح ','success');clearNewEmployee();showSection('employees');}
     else showToast('خطأ: '+res.error,'error');
   }
@@ -148,6 +158,8 @@ function clearNewEmployee(){
   document.getElementById('ne_commission').value='0';
   document.getElementById('ne_leave_days').value='2';
   document.getElementById('ne_active').value='1';
+  const st=document.getElementById('ne_salary_type'); if(st) st.value='ثابت';
+  const lbl=document.getElementById('lblSalary'); if(lbl) lbl.textContent='الراتب الشهري (جنيه)';
 }
 
 // ─── Employee Details ──────────────────────────────────────────────────────────
@@ -443,65 +455,151 @@ function editEmployee(id){
   document.getElementById('ne_active').value=emp.is_active?'1':'0';
   document.getElementById('ne_commission').value=emp.commission_percent||0;
   document.getElementById('ne_leave_days').value=emp.monthly_leave_days!=null?emp.monthly_leave_days:2;
+  // Salary type
+  const stEl=document.getElementById('ne_salary_type');
+  if(stEl){ stEl.value=emp.salary_type||'ثابت'; }
+  const lblEl=document.getElementById('lblSalary');
+  if(lblEl){ lblEl.textContent=(emp.salary_type==='يومية')?'قيمة اليومية (جنيه)':'الراتب الشهري (جنيه)'; }
 }
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
 async function saveAttendance(){
-  const empId=document.getElementById('att_emp').value;const date=document.getElementById('att_date').value;
-  const ci=document.getElementById('att_checkin').value;
-  if(!empId||!date||!ci){showToast('يرجى تعبئة بيانات الحضور','error');return;}
-  const checkIn=date+'T'+ci+':00';
-  const late=parseFloat(document.getElementById('att_late').value)||0;
-  const extra=parseFloat(document.getElementById('att_extra').value)||0;
-  await window.db.run('INSERT INTO attendance (employee_id,date,check_in,late_minutes,extra_minutes) VALUES (?,?,?,?,?)',
-    [empId,date,checkIn,late,extra]);
-  showToast('تم تسجيل الحضور ','success');loadAttendance();
-}
-async function saveCheckout(){
-  const empId=document.getElementById('att_emp').value;
-  const date=document.getElementById('att_date').value;
-  const co=document.getElementById('att_checkout').value;
-  let late = parseFloat(document.getElementById('att_late').value)||0;
-  let extra = parseFloat(document.getElementById('att_extra').value)||0;
+  const empId = document.getElementById('att_emp').value;
+  const date  = document.getElementById('att_date').value;
+  const ci    = document.getElementById('att_checkin').value;
+  if(!empId || !date || !ci){ showToast('يرجى تعبئة الموظف والتاريخ ووقت الحضور','error'); return; }
 
-  if(!empId||!date||!co){showToast('يرجى تحديد وقت الانصراف','error');return;}
-  const checkOut=date+'T'+co+':00';
-
-  const attRes = await window.db.queryOne('SELECT id, check_in FROM attendance WHERE employee_id=? AND date=? AND check_out IS NULL ORDER BY id DESC LIMIT 1', [empId, date]);
-  
-  if (attRes.success && attRes.data) {
-    const checkInTime = new Date(attRes.data.check_in);
-    const checkOutTime = new Date(checkOut);
-    
-    if (late === 0 && extra === 0) {
-      const empRes = await window.db.queryOne('SELECT work_hours_per_day FROM employees WHERE id=?', [empId]);
-      const workHours = empRes.data?.work_hours_per_day || 8;
-      const requiredMinutes = Math.floor(workHours * 60);
-      const workedMinutes = Math.floor((checkOutTime - checkInTime) / 60000);
-      
-      if (workedMinutes < requiredMinutes) {
-        late = requiredMinutes - workedMinutes;
-      } else if (workedMinutes > requiredMinutes) {
-        extra = workedMinutes - requiredMinutes;
-      }
-    }
+  // Check if already checked in today
+  const existing = await window.db.queryOne('SELECT id FROM attendance WHERE employee_id=? AND date=?',[empId, date]);
+  if(existing.success && existing.data){
+    showToast('تم تسجيل حضور هذا الموظف في هذا التاريخ مسبقاً','warning');
+    return;
   }
 
-  await window.db.run('UPDATE attendance SET check_out=?, late_minutes=?, extra_minutes=? WHERE employee_id=? AND date=? AND check_out IS NULL',[checkOut, late, extra, empId, date]);
-  showToast('تم تسجيل الانصراف ','success');
+  const checkIn = date + 'T' + ci + ':00';
+  await window.db.run('INSERT INTO attendance (employee_id,date,check_in,late_minutes,extra_minutes) VALUES (?,?,?,0,0)',
+    [empId, date, checkIn]);
+  showToast('تم تسجيل الحضور ✅','success');
+  document.getElementById('att_checkin').value = '';
   loadAttendance();
 }
+
+async function onAttEmpChange(){
+  // When employee/date changes in checkin form, sync the checkout form too
+  const empId = document.getElementById('att_emp').value;
+  const date  = document.getElementById('att_date').value;
+  document.getElementById('co_emp').value = empId;
+  document.getElementById('co_date').value = date;
+  if(empId && date) await fetchCheckinTime(empId, date);
+}
+
+async function onCoEmpChange(){
+  const empId = document.getElementById('co_emp').value;
+  const date  = document.getElementById('co_date').value;
+  if(empId && date) await fetchCheckinTime(empId, date);
+}
+
+async function fetchCheckinTime(empId, date){
+  const res = await window.db.queryOne(
+    'SELECT check_in, check_out FROM attendance WHERE employee_id=? AND date=? ORDER BY id DESC LIMIT 1',
+    [empId, date]
+  );
+  const display = document.getElementById('co_checkin_display');
+  const summary = document.getElementById('co_summary');
+  if(res.success && res.data){
+    const timeIn = res.data.check_in ? res.data.check_in.split('T')[1]?.slice(0,5) || res.data.check_in : null;
+    if(timeIn){
+      display.value = timeIn;
+      if(res.data.check_out){
+        const timeOut = res.data.check_out.split('T')[1]?.slice(0,5) || res.data.check_out;
+        summary.style.display = 'block';
+        summary.style.background = 'var(--success-light)';
+        summary.innerHTML = `✅ تم تسجيل الانصراف بالفعل: <strong>${timeOut}</strong>`;
+      } else {
+        summary.style.display = 'block';
+        summary.style.background = 'var(--warning-light)';
+        summary.innerHTML = `⏳ الموظف حاضر منذ <strong>${timeIn}</strong> — ولم يُسجَّل انصرافه بعد`;
+      }
+    } else {
+      display.value = '';
+      summary.style.display = 'none';
+    }
+  } else {
+    display.value = '';
+    summary.style.display = 'block';
+    summary.style.background = 'var(--danger-light)';
+    summary.innerHTML = '⚠️ لا يوجد سجل حضور لهذا الموظف في هذا التاريخ';
+  }
+}
+
+async function saveCheckout(){
+  const empId = document.getElementById('co_emp').value;
+  const date  = document.getElementById('co_date').value;
+  const co    = document.getElementById('co_checkout').value;
+  if(!empId || !date || !co){ showToast('يرجى تحديد الموظف والتاريخ ووقت الانصراف','error'); return; }
+
+  const checkOut = date + 'T' + co + ':00';
+  const attRes = await window.db.queryOne(
+    'SELECT id, check_in FROM attendance WHERE employee_id=? AND date=? ORDER BY id DESC LIMIT 1',
+    [empId, date]
+  );
+
+  if(!attRes.success || !attRes.data){
+    showToast('لا يوجد سجل حضور لهذا الموظف في هذا التاريخ — سجّل الحضور أولاً','error');
+    return;
+  }
+
+  let late  = parseFloat(document.getElementById('co_late').value)  || 0;
+  let extra = parseFloat(document.getElementById('co_extra').value) || 0;
+
+  // Auto-calculate if both are still 0
+  if(late === 0 && extra === 0 && attRes.data.check_in){
+    const empRes = await window.db.queryOne('SELECT work_hours_per_day FROM employees WHERE id=?', [empId]);
+    const workHours = empRes.data?.work_hours_per_day || 8;
+    const required  = Math.floor(workHours * 60);
+    const checkInTime  = new Date(attRes.data.check_in);
+    const checkOutTime = new Date(checkOut);
+    const worked = Math.floor((checkOutTime - checkInTime) / 60000);
+    if(worked < required) late  = required - worked;
+    else if(worked > required) extra = worked - required;
+  }
+
+  await window.db.run(
+    'UPDATE attendance SET check_out=?, late_minutes=?, extra_minutes=? WHERE id=?',
+    [checkOut, late, extra, attRes.data.id]
+  );
+
+  showToast(`تم تسجيل الانصراف ✅ | تأخير: ${late} دق | زيادة: ${extra} دق`, 'success');
+  document.getElementById('co_checkout').value = '';
+  document.getElementById('co_late').value = '0';
+  document.getElementById('co_extra').value = '0';
+  document.getElementById('co_summary').style.display = 'none';
+  loadAttendance();
+}
+
+async function deleteAttendance(id){
+  if(!confirm('حذف هذا السجل؟')) return;
+  await window.db.run('DELETE FROM attendance WHERE id=?',[id]);
+  showToast('تم الحذف','success');
+  loadAttendance();
+}
+
 async function loadAttendance(){
-  const res=await window.db.query(
+  const res = await window.db.query(
     'SELECT a.*,e.name as emp_name FROM attendance a LEFT JOIN employees e ON a.employee_id=e.id ORDER BY a.id DESC LIMIT 100',[]);
-  const tbody=document.getElementById('attendanceBody');
-  if(!res.success||!res.data.length){tbody.innerHTML='<tr><td colspan="6" class="table-empty">لا توجد سجلات</td></tr>';return;}
-  tbody.innerHTML=res.data.map(r=>`<tr>
-    <td style="font-weight:600;">${r.emp_name||'—'}</td><td>${r.date}</td>
-    <td>${r.check_in?r.check_in.split('T')[1]?.slice(0,5)||r.check_in:'—'}</td>
-    <td>${r.check_out?r.check_out.split('T')[1]?.slice(0,5)||r.check_out:'<span class="badge badge-warning">لم ينصرف</span>'}</td>
+  const tbody = document.getElementById('attendanceBody');
+  if(!res.success || !res.data.length){
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">لا توجد سجلات</td></tr>';
+    return;
+  }
+  tbody.innerHTML = res.data.map(r => `<tr>
+    <td style="font-weight:600;">${r.emp_name||'—'}</td>
+    <td>${r.date}</td>
+    <td style="color:var(--success);font-weight:700;">${r.check_in ? r.check_in.split('T')[1]?.slice(0,5)||r.check_in : '—'}</td>
+    <td>${r.check_out ? `<span style="color:var(--primary);font-weight:700;">${r.check_out.split('T')[1]?.slice(0,5)||r.check_out}</span>` : '<span class="badge badge-warning">لم ينصرف</span>'}</td>
     <td style="color:var(--danger);">${r.late_minutes||0}</td>
     <td style="color:var(--success);">${r.extra_minutes||0}</td>
+    <td><button class="btn btn-sm btn-danger" onclick="deleteAttendance(${r.id})">حذف</button></td>
   </tr>`).join('');
 }
 
@@ -591,154 +689,121 @@ async function saveCustody(){
   showToast('تم تسجيل العهدة ','success');document.getElementById('cus_item').value='';loadCustody();
 }
 async function loadCustody(){
-  const res=await window.db.query('SELECT c.*,e.name as emp_name FROM custody c LEFT JOIN employees e ON c.employee_id=e.id ORDER BY c.id DESC LIMIT 100',[]);
-  const tbody=document.getElementById('custodyBody');
-  if(!res.success||!res.data.length){tbody.innerHTML='<tr><td colspan="6" class="table-empty">لا توجد عهد</td></tr>';return;}
-  tbody.innerHTML=res.data.map(r=>`<tr><td>${r.emp_name}</td><td style="font-weight:600;">${r.item_name}</td>
-    <td style="text-align:center;">${r.quantity}</td><td>${r.date_given}</td>
-    <td>${r.date_returned||'<span class="badge badge-warning">لم تُسترد</span>'}</td>
-    <td>${r.date_returned?'—':'<button class="btn btn-sm btn-success" onclick="returnCustody('+r.id+')">استرداد</button>'}</td></tr>`).join('');
+  const res = await window.db.query('SELECT c.*,e.name as emp_name FROM custody c LEFT JOIN employees e ON c.employee_id=e.id ORDER BY c.id DESC LIMIT 100',[]);
+  const tbody = document.getElementById('custodyBody');
+  if(!res.success || !res.data.length){ tbody.innerHTML='<tr><td colspan="6" class="table-empty">لا توجد عهد</td></tr>'; return; }
+  tbody.innerHTML = res.data.map(r=>`<tr>
+    <td>${r.emp_name}</td>
+    <td>${r.item_name}</td>
+    <td>${r.quantity||1}</td>
+    <td>${r.date||'—'}</td>
+    <td>${r.notes||'—'}</td>
+    <td><button class="btn btn-sm btn-danger" onclick="deleteCustody(${r.id})">حذف</button></td>
+  </tr>`).join('');
 }
-async function returnCustody(id){
-  const today=new Date().toISOString().split('T')[0];
-  await window.db.run('UPDATE custody SET date_returned=? WHERE id=?',[today,id]);
-  showToast('تم تسجيل الاسترداد ','success');loadCustody();
-}
+async function deleteCustody(id){ if(!confirm('حذف؟'))return; await window.db.run('DELETE FROM custody WHERE id=?',[id]); loadCustody(); }
 
-// ─── Salary ───────────────────────────────────────────────────────────────────
-function loadSalaryMonths(){
-  const sel=document.getElementById('salaryMonth');
-  sel.innerHTML='';
-  const now=new Date();
-  for(let i=0;i<12;i++){
-    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
-    const val=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-    const label=d.toLocaleDateString('ar-EG',{year:'numeric',month:'long'});
-    sel.innerHTML+=`<option value="${val}">${label}</option>`;
-  }
-}
+let pendingSalary = null;
+let _payEmpData   = {}; // extra employee data for overtime calc
 
-async function loadSalaryReport(){
-  const month=document.getElementById('salaryMonth').value;
-  if(!month) return;
-  const [year,mon]=month.split('-');
-  const empRes=await window.db.query('SELECT * FROM employees WHERE is_active=1 ORDER BY name',[]);
-  if(!empRes.success) return;
+function paySalary(empId, name, gross, advances, ded, inc, net, month, salaryType, dailyRate, workHours, totalLateMin, totalExtraMin){
+  pendingSalary = { employee_id: empId, month, gross_salary: gross, total_advances: advances, deductions: ded, incentives: inc, net_salary: net };
+  _payEmpData   = { salaryType, dailyRate: dailyRate||0, workHours: workHours||8, totalLateMin: totalLateMin||0, totalExtraMin: totalExtraMin||0 };
 
-  const tbody=document.getElementById('salaryBody');
-  let rows='';
-  for(const emp of empRes.data){
-    const advRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM advances WHERE employee_id=? AND strftime('%Y-%m',date)=? AND paid_back=0`,[emp.id,month]);
-    const dedRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM deductions WHERE employee_id=? AND strftime('%Y-%m',date)=?`,[emp.id,month]);
-    const incRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM incentives WHERE employee_id=? AND strftime('%Y-%m',date)=?`,[emp.id,month]);
-    const paidRes=await window.db.queryOne(`SELECT COALESCE(SUM(net_salary),0) as total_paid, COALESCE(SUM(total_advances),0) as paid_advances FROM salary_payments WHERE employee_id=? AND month=?`,[emp.id,month]);
-    
-    const commRes = await window.db.queryOne(`SELECT COALESCE(SUM(net_total), 0) as total_sales FROM invoices WHERE tailor_id=? AND strftime('%Y-%m', invoice_date)=?`, [emp.id, month]);
-    const returnsRes = await window.db.queryOne(`SELECT COALESCE(SUM(r.total_returned), 0) as total_returned FROM returns r JOIN invoices i ON r.original_invoice_id = i.id WHERE i.tailor_id=? AND strftime('%Y-%m', i.invoice_date)=?`, [emp.id, month]);
-    
-    // Leave Allowance Logic
-    const leavesRes = await window.db.queryOne(`SELECT COUNT(*) as count FROM leaves WHERE employee_id=? AND strftime('%Y-%m', leave_date)=?`, [emp.id, month]);
-    const takenLeaves = leavesRes.data?.count || 0;
-    const allowance = emp.monthly_leave_days != null ? emp.monthly_leave_days : 2;
-    const dayValue = (emp.monthly_salary || 0) / 30;
-    
-    let leaveBonus = 0;
-    let leaveDeduction = 0;
-    if (takenLeaves < allowance) {
-      leaveBonus = (allowance - takenLeaves) * dayValue;
-    } else if (takenLeaves > allowance) {
-      leaveDeduction = (takenLeaves - allowance) * dayValue;
-    }
-
-    const netSales = (commRes.data?.total_sales || 0) - (returnsRes.data?.total_returned || 0);
-    const commissionPercent = emp.commission_percent || 0;
-    const commission = Math.max(0, netSales) * (commissionPercent / 100);
-
-    const gross=emp.monthly_salary||0;
-    const advances=(advRes.data?.total||0) + (paidRes.data?.paid_advances || 0);
-    const manualDed=dedRes.data?.total||0;
-    const manualInc=incRes.data?.total||0;
-    
-    const ded = manualDed + leaveDeduction;
-    const inc = manualInc + leaveBonus;
-    
-    const totalDue = gross + commission - advances - ded + inc;
-    const totalPaid = paidRes.data?.total_paid || 0;
-    const net = totalDue - totalPaid;
-    const paid = net <= 0 && totalPaid > 0 && Math.abs(net) < 0.01;
-
-    rows+=`<tr class="${paid?'salary-row-highlight':''}">
-      <td style="font-weight:600;">${emp.name}</td>
-      <td style="color:var(--accent);">${fmt(gross)}</td>
-      <td style="color:#8b5cf6; font-weight:bold;">${fmt(commission)} ${commissionPercent > 0 ? `<small style="font-size:10px;color:gray;">(%${commissionPercent})</small>` : ''}</td>
-      <td style="color:var(--warning);">${fmt(advances)}</td>
-      <td style="color:var(--danger);">${fmt(ded)}</td>
-      <td style="color:var(--success);">${fmt(inc)}</td>
-      <td style="font-weight:700;font-size:15px; color:${net<0?'var(--danger)':'inherit'};" dir="ltr">${fmt(net)}</td>
-      <td>${paid?'<span class="badge badge-success">مُسدد بالكامل</span>':(totalPaid > 0 ? `<span class="badge badge-warning">مدفوع ${fmt(totalPaid)}</span>` : (net < 0 ? '<span class="badge badge-danger">مدين للشركة</span>' : '<span class="badge badge-warning">لم يُصرف</span>'))}</td>
-      <td>${(totalPaid > 0) ? `<button class="btn btn-sm btn-danger" onclick="reverseSalaryPayment(${emp.id},'${month}')">إلغاء الصرف</button>` : ((net <= 0) ? '—' : `<button class="btn btn-sm btn-success" onclick="paySalary(${emp.id},'${emp.name}',${gross},${advances},${ded},${inc},${net},'${month}')">صرف المتبقي</button>`)}</td>
-    </tr>`;
-  }
-  tbody.innerHTML = rows || '<tr><td colspan="9" class="table-empty">لا يوجد موظفون</td></tr>';
-}
-
-let pendingSalary=null;
-function paySalary(empId,name,gross,advances,ded,inc,net,month){
-  pendingSalary={employee_id:empId,month,gross_salary:gross,total_advances:advances,deductions:ded,incentives:inc,net_salary:net};
-  
-  // ملء الـ summary
-  document.getElementById('salaryPaySummary').innerHTML=`
+  // Summary header
+  document.getElementById('salaryPaySummary').innerHTML = `
     <div style="font-size:32px;margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--success);"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8v2m0 8v2m9-6a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
     <div style="font-size:15px;font-weight:700;color:var(--primary);">${name}</div>
     <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">${month}</div>
     <div style="margin-top:10px;font-size:20px;font-weight:900;color:var(--success);">${fmt(net)} جنيه</div>
     <div style="font-size:11px;color:var(--text-muted);">الصافي المتبقي المستحق</div>
   `;
-  
-  // تعيين القيم الافتراضية
-  document.getElementById('payPartialAmount').max = net;
-  document.getElementById('payPartialAmount').value = fmt(net).replace(/[^0-9.]/g,'');
-  document.getElementById('payCashAmount').value = fmt(net).replace(/[^0-9.]/g,'');
-  document.getElementById('payVodafoneAmount').value = '0';
+
+  // Show/hide overtime section
+  const overtimeSection = document.getElementById('overtime_section');
+  if(salaryType === 'يومية' && (totalLateMin > 0 || totalExtraMin > 0)){
+    overtimeSection.style.display = 'block';
+    const defaultHourlyRate = workHours > 0 ? (dailyRate / workHours) : 0;
+    document.getElementById('pay_hourly_rate').value = defaultHourlyRate.toFixed(2);
+
+    const lateRow  = document.getElementById('late_row');
+    const extraRow = document.getElementById('extra_row');
+    if(totalLateMin > 0){
+      lateRow.style.display  = 'block';
+      document.getElementById('pay_late_label').textContent = totalLateMin;
+    } else lateRow.style.display = 'none';
+    if(totalExtraMin > 0){
+      extraRow.style.display = 'block';
+      document.getElementById('pay_extra_label').textContent = totalExtraMin;
+    } else extraRow.style.display = 'none';
+
+    document.getElementById('pay_deduct_late').checked = false;
+    document.getElementById('pay_add_extra').checked   = false;
+    recalcOvertimeDue();
+  } else {
+    overtimeSection.style.display = 'none';
+  }
+
+  // Default amounts
+  document.getElementById('payPartialAmount').max   = net;
+  document.getElementById('payPartialAmount').value = net.toFixed(2);
+  document.getElementById('payCashAmount').value    = net.toFixed(2);
+  document.getElementById('payVodafoneAmount').value= '0';
   document.getElementById('paySplitHint').textContent = '';
-  
-  // عند تغيير المبلغ الكلي → صفّر التقسيم تلقائياً للنقدي
+
   document.getElementById('payPartialAmount').oninput = function(){
     const total = parseFloat(this.value)||0;
-    document.getElementById('payCashAmount').value = total.toFixed(2);
+    document.getElementById('payCashAmount').value   = total.toFixed(2);
     document.getElementById('payVodafoneAmount').value = '0';
     document.getElementById('paySplitHint').textContent = '';
   };
 
-  document.getElementById('confirmPayBtn').onclick=async()=>{
-    const totalToPay = parseFloat(document.getElementById('payPartialAmount').value)||0;
-    const cashAmt    = parseFloat(document.getElementById('payCashAmount').value)||0;
-    const vodafoneAmt= parseFloat(document.getElementById('payVodafoneAmount').value)||0;
-    
+  document.getElementById('confirmPayBtn').onclick = async () => {
+    let totalToPay = parseFloat(document.getElementById('payPartialAmount').value)||0;
+    const cashAmt     = parseFloat(document.getElementById('payCashAmount').value)||0;
+    const vodafoneAmt = parseFloat(document.getElementById('payVodafoneAmount').value)||0;
+
     if(totalToPay <= 0){ showToast('يرجى إدخال مبلغ صحيح','error'); return; }
-    if(totalToPay > net + 0.01){ showToast(`المبلغ المدخل (${fmt(totalToPay)}) أكبر من الصافي المستحق (${fmt(net)})`, 'error'); return; }
-    
+
     const splitTotal = cashAmt + vodafoneAmt;
     if(Math.abs(splitTotal - totalToPay) > 0.01){
-      showToast(`مجموع التقسيم (${fmt(splitTotal)}) لا يساوي المبلغ المراد صرفه (${fmt(totalToPay)})`, 'error'); return;
+      showToast(`مجموع التقسيم (${fmt(splitTotal)}) لا يساوي المبلغ المراد صرفه (${fmt(totalToPay)})`, 'error');
+      return;
     }
 
-    const salaryData = {
-      ...pendingSalary,
-      net_salary: totalToPay,
-      cash_amount: cashAmt,
-      vodafone_amount: vodafoneAmt
-    };
-    const res=await window.db.paySalary(salaryData);
+    const salaryData = { ...pendingSalary, net_salary: totalToPay, cash_amount: cashAmt, vodafone_amount: vodafoneAmt };
+    const res = await window.db.paySalary(salaryData);
     if(res.success){
       const partialNote = totalToPay < net ? ` (${fmt(totalToPay)} جنيه من أصل ${fmt(net)})` : '';
       showToast(`تم صرف راتب ${name}${partialNote} ✅`,'success');
       closeModal('salaryConfirmModal');
       loadSalaryReport();
-    }
-    else showToast('خطأ: '+res.error,'error');
+    } else showToast('خطأ: '+res.error,'error');
   };
   openModal('salaryConfirmModal');
+}
+
+function recalcOvertimeDue(){
+  const hourlyRate   = parseFloat(document.getElementById('pay_hourly_rate').value)||0;
+  const deductLate   = document.getElementById('pay_deduct_late')?.checked;
+  const addExtra     = document.getElementById('pay_add_extra')?.checked;
+  const lateMin      = _payEmpData.totalLateMin  || 0;
+  const extraMin     = _payEmpData.totalExtraMin || 0;
+  const lateVal      = (lateMin  / 60) * hourlyRate;
+  const extraVal     = (extraMin / 60) * hourlyRate;
+
+  document.getElementById('pay_late_val').textContent  = fmt(lateVal);
+  document.getElementById('pay_extra_val').textContent = fmt(extraVal);
+
+  let baseNet = pendingSalary?.net_salary || 0;
+  // Re-read the original net from pendingSalary (before any late/extra adjustment)
+  let adjustedNet = baseNet;
+  if(deductLate)  adjustedNet -= lateVal;
+  if(addExtra)    adjustedNet += extraVal;
+
+  document.getElementById('payPartialAmount').value   = adjustedNet.toFixed(2);
+  document.getElementById('payCashAmount').value      = adjustedNet.toFixed(2);
+  document.getElementById('payVodafoneAmount').value  = '0';
 }
 
 async function reverseSalaryPayment(empId, month) {

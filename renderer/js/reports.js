@@ -1,4 +1,4 @@
-﻿
+
 function fmt(n){ return Number(n||0).toLocaleString('ar-EG', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
@@ -627,16 +627,16 @@ async function reprintPastInvoice(inv) {
 
     const receiptHTML = `
       <div class="receipt" style="
-        width:100%;
-        max-width:80mm;
+        width:68mm;
         box-sizing:border-box;
         font-family:'Cairo',Arial,sans-serif;
         font-size:11px;
         font-weight:700;
         color:#000;
         direction:rtl;
-        padding:3mm 2mm;
-        margin:0 auto;
+        padding:2mm;
+        margin:0;
+        margin-left:2mm;
         -webkit-print-color-adjust:exact;
         print-color-adjust:exact;
       ">
@@ -686,27 +686,19 @@ async function reprintPastInvoice(inv) {
 
     Swal.fire({
       title: 'معاينة الطباعة',
-      html: `<div style="display:flex;justify-content:center;max-height:400px;overflow-y:auto;background:#fff;padding:10px;border:1px solid #ddd;border-radius:8px;">${receiptHTML}</div>`,
+      html: `<div style="display:flex;justify-content:center;max-height:400px;overflow-y:auto;background:#fff;padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:80mm;margin:0 auto;">${receiptHTML}</div>`,
       showCancelButton: true,
       confirmButtonText: 'طباعة الآن',
       cancelButtonText: 'إلغاء',
       confirmButtonColor: '#3085d6',
       cancelButtonColor: '#d33',
       width: 'auto'
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
-        let iframe = document.getElementById('printInvoiceFrame');
-        if (!iframe) {
-          iframe = document.createElement('iframe');
-          iframe.id = 'printInvoiceFrame';
-          iframe.style.cssText = 'display:none;position:fixed;width:0;height:0;border:none;';
-          document.body.appendChild(iframe);
-        }
-        const doc = iframe.contentWindow.document;
-        doc.open(); 
-        doc.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>طباعة الفاتورة</title></head><body style="margin:0;padding:0;">${receiptHTML}</body></html>`); 
-        doc.close();
-        setTimeout(()=>{ iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 350);
+        document.getElementById('receiptPrint').innerHTML = receiptHTML;
+        await new Promise(r => setTimeout(r, 120));
+        await window.electron.print();
+        await new Promise(r => setTimeout(r, 500));
       }
     });
   } catch (err) {

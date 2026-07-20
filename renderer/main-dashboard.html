@@ -588,6 +588,38 @@
   </div>
 </div>
 
+<!-- Attendance Modal -->
+<div class="modal-overlay" id="attendanceModal">
+  <div class="modal modal-sm" style="max-width:400px;">
+    <div class="modal-header">
+      <div class="modal-title">تسجيل حضور / انصراف</div>
+      <button class="modal-close" onclick="closeModal('attendanceModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">الموظف/الصنايعي</label>
+        <select class="form-control" id="attEmpSelect"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input type="date" class="form-control" id="attDate">
+      </div>
+      <div class="form-group">
+        <label class="form-label">وقت الحضور</label>
+        <input type="time" class="form-control" id="attTimeIn">
+      </div>
+      <div class="form-group">
+        <label class="form-label">وقت الانصراف (اختياري)</label>
+        <input type="time" class="form-control" id="attTimeOut">
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:center;gap:10px;">
+      <button class="btn btn-primary" onclick="saveDashboardAttendance()">تسجيل حضور</button>
+      <button class="btn btn-warning" onclick="saveDashboardCheckout()">تسجيل انصراف</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/shared/common.js"></script>
 <script src="js/main-dashboard.js"></script>
 </body>

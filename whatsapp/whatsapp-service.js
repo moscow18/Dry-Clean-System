@@ -64,12 +64,21 @@ function initWhatsApp(mainWindow, userData) {
         },
     });
 
+    // ── Timeout لتعليق الواتساب على ويندوز 7 ──
+    let initTimeout = setTimeout(() => {
+        if (!clientReady && !currentQR) {
+            sendToRenderer('whatsapp:error', 'المتصفح استغرق وقتاً طويلاً. قد يكون الويندوز قديماً (مثل ويندوز 7) أو غير متوافق. تأكد من تحميل Google Chrome محدث.');
+            clientReady = false;
+        }
+    }, 45000);
+
     // ── الأحداث ──
     client.on('loading_screen', (percent) => {
         sendToRenderer('whatsapp:loading', percent);
     });
 
     client.on('qr', async (qr) => {
+        clearTimeout(initTimeout);
         currentQR = qr;
         try {
             const qrImage = await qrcode.toDataURL(qr, { width: 256, margin: 2 });
@@ -85,11 +94,13 @@ function initWhatsApp(mainWindow, userData) {
     });
 
     client.on('auth_failure', (msg) => {
+        clearTimeout(initTimeout);
         clientReady = false;
         sendToRenderer('whatsapp:error', msg);
     });
 
     client.on('ready', () => {
+        clearTimeout(initTimeout);
         clientReady = true;
         currentQR = null;
         sendToRenderer('whatsapp:ready');
@@ -163,7 +174,7 @@ async function disconnectWhatsApp() {
 
 // القوالب الافتراضية (تُستخدم لو مفيش قالب محفوظ في الإعدادات)
 const DEFAULT_TEMPLATES = {
-  invoiceConfirm: `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالخياط المنفذ: {tailorName}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\n\nفي انتظار إطلالتك الجديدة 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
+  invoiceConfirm: `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالفني المنفذ: {tailorName}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع للتصاليح: 48 ساعة من تاريخ الفاتورة\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
 
   orderReady: `أهلاً {customerName} 🤍\n\nشغلك جاهز عندنا في {shopName} ✂️\nتم تجهيز طلبك بفاتورة رقم {invoiceNumber} وفي انتظار استلامك في أقرب فرصة.\nنتمنى نكون عند حسن ظنك 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
 

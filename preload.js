@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('backup', {
   create: (type) => ipcRenderer.invoke('backup:create', type),
   list: () => ipcRenderer.invoke('backup:list'),
   restore: (filePath) => ipcRenderer.invoke('backup:restore', filePath),
+  getExternalPath: () => ipcRenderer.invoke('backup:getExternalPath'),
+  setExternalPath: (dir) => ipcRenderer.invoke('backup:setExternalPath', dir),
+  clearExternalPath: () => ipcRenderer.invoke('backup:clearExternalPath'),
 });
 
 contextBridge.exposeInMainWorld('db', {
