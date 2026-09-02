@@ -15,7 +15,7 @@ const _k = ['EL-TARZY', 'DEVBLUETECH', '2024', 'SECRET', 'X9K3M7P2'];
 const SECRET_KEY = _k.join('-');
 
 // ─── مدة التجربة المجانية (بالأيام) ──────────────────────────────────────────
-const TRIAL_DAYS = 7;
+const TRIAL_DAYS = 0;
 
 // ─── مرجع لـ app ─────────────────────────────────────────────────────────────
 let _app = null;
@@ -33,15 +33,14 @@ function getActivationFilePath() {
   return path.join(dir, '.lic');
 }
 
-// ─── مسار كود التثبيت (داخل مجلد التطبيق — يتمسح مع البرنامج) ──────────────
+// ─── مسار كود التثبيت (في userData — مكتوب/مقروء بدون صلاحيات مرتفعة) ────────
 function getInstallIdFilePath() {
-  if (_app && _app.isPackaged) {
-    // في النسخة المبنية: نفس مجلد الـ .exe
-    return path.join(path.dirname(process.execPath), '.install.id');
-  } else {
-    // في وضع التطوير: داخل مجلد المشروع
-    return path.join(__dirname, '.install.id');
+  // نحفظ في userData دايماً: مكتوب بالإذن العادي، ويُحذف وقت الـ uninstall
+  if (_appDataPath) {
+    return path.join(_appDataPath, '.install.id');
   }
+  // fallback وقت التطوير قبل ما يُضبط _appDataPath
+  return path.join(__dirname, '.install.id');
 }
 
 // ─── الحصول على كود التثبيت (يُولد مرة واحدة ويُحفظ) ──────────────────────
@@ -146,12 +145,12 @@ function ensureFirstRunRecorded() {
       installId:   currentInstallId,
     };
     writeActivationData(data);
+
   } else if (data.installId && data.installId !== currentInstallId) {
-    // ⚠️ تم إعادة تثبيت البرنامج — كود التثبيت تغيّر
-    // احتفظ بـ hwId لكن ألغِ التفعيل وأعد فترة التجربة
+    // ⚠️ تم إعادة تثبيت البرنامج — كود التثبيت تغيّر → إلغاء التفعيل
     console.log('[Activation] Install ID changed — resetting activation (reinstall detected)');
     data = {
-      firstRun:    new Date().toISOString(), // فترة تجربة جديدة
+      firstRun:    data.firstRun, // لا تعطِ فترة تجربة جديدة
       activated:   false,
       activatedAt: null,
       serialHash:  null,
@@ -159,13 +158,20 @@ function ensureFirstRunRecorded() {
       installId:   currentInstallId,
     };
     writeActivationData(data);
+
+  } else if (!data.installId) {
+    // ترخيص قديم بدون installId (نسخ قديمة) — نضيف installId بدون إلغاء التفعيل
+    console.log('[Activation] Legacy license without installId — updating to include current installId');
+    data.installId = currentInstallId;
+    data.hwId = data.hwId || getHardwareId();
+    writeActivationData(data);
   }
   return data;
 }
 
 // ─── الحصول على حالة التفعيل الكاملة ────────────────────────────────────────
 function getActivationStatus() {
-  const data      = ensureFirstRunRecorded(); // هنا يتم الكشف عن إعادة التثبيت
+  const data      = ensureFirstRunRecorded();
   const hwId      = getHardwareId();
   const installId = getInstallId();
 
@@ -175,11 +181,28 @@ function getActivationStatus() {
     const installMatch = data.installId === installId;
 
     if (!hwMatch || !installMatch) {
-      // الجهاز أو التثبيت تغيّر — أبطل التفعيل فوراً
       console.log('[Activation] HW or Install ID mismatch — deactivating');
       return { activated: false, trialExpired: true, daysLeft: 0, hwId, installId };
     }
-    return { activated: true, trialExpired: false, daysLeft: 999, hwId, installId };
+
+    // ─── تحقق من انتهاء التفعيل المؤقت ──────────────────────────────────
+    if (data.expiresAt) {
+      const expiresAt = new Date(data.expiresAt);
+      const now       = new Date();
+      if (now > expiresAt) {
+        // التفعيل المؤقت انتهى
+        return { activated: false, trialExpired: true, daysLeft: 0, hwId, installId };
+      }
+      const daysLeft = Math.max(1, Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24)));
+      return {
+        activated: true, trialExpired: false, daysLeft,
+        isTimed: true, activationExpiry: data.expiresAt,
+        hwId, installId
+      };
+    }
+
+    // ─── تفعيل دائم ──────────────────────────────────────────────────────
+    return { activated: true, trialExpired: false, daysLeft: null, isTimed: false, hwId, installId };
   }
 
   // احسب أيام التجربة
@@ -195,33 +218,62 @@ function getActivationStatus() {
 // ─── التحقق من السيريال وتفعيل البرنامج ─────────────────────────────────────
 function activateWithSerial(serial) {
   try {
-    const hwId      = getHardwareId();
-    const installId = getInstallId();
-    const expected  = generateSerial(hwId, installId);
+    const hwId        = getHardwareId();
+    const installId   = getInstallId();
+    const cleanSerial = serial.trim().toUpperCase();
+    const parts       = cleanSerial.split('-');
 
-    const cleanInput    = serial.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const cleanExpected = expected.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let isValid      = false;
+    let activatedDays = 0;   // 0 = دائم
+    let expiresAt    = null;
 
-    if (cleanInput !== cleanExpected) {
+    if (parts.length === 4) {
+      // ─── Format قديم: تفعيل دائم ─────────────────────────────────────────
+      const expected      = generateSerial(hwId, installId);
+      const cleanInput    = cleanSerial.replace(/[^A-Z0-9]/g, '');
+      const cleanExpected = expected.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      isValid = (cleanInput === cleanExpected);
+
+    } else if (parts.length === 5) {
+      // ─── Format جديد: تفعيل مؤقت ─────────────────────────────────────────
+      const daysStr = parts[4];
+      const days    = parseInt(daysStr, 10);
+      if (isNaN(days) || days <= 0) {
+        return { success: false, error: 'عدد أيام التفعيل غير صحيح في الكود' };
+      }
+      const expectedFull  = generateTimedSerial(hwId, installId, days);
+      const cleanInput    = cleanSerial.replace(/[^A-Z0-9]/g, '');
+      const cleanExpected = expectedFull.replace(/[^A-Z0-9]/g, '');
+      isValid       = (cleanInput === cleanExpected);
+      activatedDays = days;
+      expiresAt     = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+    } else {
+      return { success: false, error: 'صيغة مفتاح التفعيل غير صحيحة' };
+    }
+
+    if (!isValid) {
       return { success: false, error: 'مفتاح التفعيل غير صحيح' };
     }
 
-    const data        = readActivationData() || {};
-    data.activated    = true;
-    data.activatedAt  = new Date().toISOString();
-    data.serialHash   = crypto.createHash('sha256').update(serial).digest('hex');
-    data.hwId         = hwId;
-    data.installId    = installId;
+    const data         = readActivationData() || {};
+    data.activated     = true;
+    data.activatedAt   = new Date().toISOString();
+    data.serialHash    = crypto.createHash('sha256').update(serial).digest('hex');
+    data.hwId          = hwId;
+    data.installId     = installId;
+    data.activatedDays = activatedDays;
+    data.expiresAt     = expiresAt;
     writeActivationData(data);
 
-    return { success: true };
+    return { success: true, activatedDays, expiresAt };
   } catch (e) {
     console.error('[Activation] Error during activation:', e);
     return { success: false, error: 'حدث خطأ أثناء التفعيل' };
   }
 }
 
-// ─── توليد السيريال من كود الجهاز + كود التثبيت ─────────────────────────────
+// ─── توليد السيريال الدائم من كود الجهاز + كود التثبيت ──────────────────────
 function generateSerial(hwId, installId) {
   const cleanHw      = hwId.replace(/-/g, '').toUpperCase();
   const cleanInstall = installId.replace(/-/g, '').toUpperCase();
@@ -236,6 +288,22 @@ function generateSerial(hwId, installId) {
   return `${part.slice(0,5)}-${part.slice(5,10)}-${part.slice(10,15)}-${part.slice(15,20)}`;
 }
 
+// ─── توليد السيريال المؤقت (hwId + installId + days) ────────────────────────
+function generateTimedSerial(hwId, installId, days) {
+  const cleanHw      = hwId.replace(/-/g, '').toUpperCase();
+  const cleanInstall = installId.replace(/-/g, '').toUpperCase();
+  const daysStr      = String(parseInt(days, 10)).padStart(5, '0');
+  const combined     = cleanHw + cleanInstall + ':' + daysStr;
+
+  const hmac = crypto.createHmac('sha256', SECRET_KEY)
+                     .update(combined)
+                     .digest('hex')
+                     .toUpperCase();
+
+  const part = hmac.substring(0, 20);
+  return `${part.slice(0,5)}-${part.slice(5,10)}-${part.slice(10,15)}-${part.slice(15,20)}-${daysStr}`;
+}
+
 // ─── IPC Handlers ─────────────────────────────────────────────────────────────
 function setupActivationIpc(ipcMain, app) {
   setAppDataPath(app.getPath('userData'), app);
@@ -247,4 +315,4 @@ function setupActivationIpc(ipcMain, app) {
   ipcMain.handle('activation:getInstallId', () => getInstallId());
 }
 
-module.exports = { setupActivationIpc, getActivationStatus, getHardwareId, getInstallId, generateSerial };
+module.exports = { setupActivationIpc, getActivationStatus, getHardwareId, getInstallId, generateSerial, generateTimedSerial };

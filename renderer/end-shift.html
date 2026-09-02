@@ -4,8 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EL-TARZY — إنهاء الشيفت</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles/global.css" />
   <style>
     body {
@@ -337,7 +335,7 @@
       body > *:not(.receipt-print) { display: none !important; }
       .receipt-print {
         display: block !important;
-        position: fixed !important;
+        position: static !important;
         top: 0 !important;
         right: 0 !important;
         width: 72mm !important;
@@ -393,13 +391,17 @@
         <div class="summary-item-label">مبيعات فودافون كاش</div>
         <div class="summary-item-value" style="color:#E60023" id="vodafoneSales">0</div>
       </div>
+      <div class="summary-item" id="instapayCardRow" style="display:none">
+        <div class="summary-item-label">مبيعات إنستا باي (تحويل)</div>
+        <div class="summary-item-value" style="color:#7B2FF7" id="instapaySales">0</div>
+      </div>
     </div>
 
     <!-- Expected cash -->
     <div class="expected-box">
       <div class="expected-label">المبلغ المتوقع في الخزينة (محسوب تلقائياً)</div>
       <div class="expected-value" id="expectedCash">0</div>
-      <div class="expected-note">= العهدة + مبيعات نقدي — مرتجعات — مصروفات</div>
+      <div class="expected-note">= العهدة + مبيعات نقدي — مرتجعات — مصروفات — سلف</div>
     </div>
 
     <!-- Actual cash input -->
@@ -429,6 +431,20 @@
         <input type="number" class="actual-input" id="actualVodafone"
                placeholder="المبلغ الفعلي" min="0" step="0.01"
                style="height:44px;font-size:18px;" />
+      </div>
+    </div>
+
+    <!-- InstaPay section (if applicable) -->
+    <div class="vodafone-section" id="instapaySection">
+      <div class="vodafone-title" style="color:#7B2FF7">إنستا باي / تحويل</div>
+      <div class="vodafone-row">
+        <div class="vodafone-label">المتوقع:</div>
+        <div class="vodafone-value" id="instapayExpected">0</div>
+      </div>
+      <div class="actual-field" style="margin-top:8px;margin-bottom:0;">
+        <input type="number" class="actual-input" id="actualInstapay"
+               placeholder="المبلغ الفعلي" min="0" step="0.01"
+               style="height:44px;font-size:18px; border-color:#7B2FF7" />
       </div>
     </div>
 
@@ -482,7 +498,8 @@
     <div class="modal-body" style="text-align:center;">
       <p style="font-size:14px;font-weight:600;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
     </div>
-    <div class="modal-footer" style="justify-content:center;gap:8px;">
+    <div class="modal-footer" style="justify-content:center;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="sendDailyReportAndQuit()" style="width:100%;margin-bottom:8px;">إرسال التقرير وإنهاء</button>
       <button class="btn btn-success" onclick="window.electron.quitWithBackup()">نسخ وخروج</button>
       <button class="btn btn-danger" onclick="window.electron.quitWithoutBackup()">خروج بدون نسخة</button>
       <button class="btn btn-outline" onclick="document.getElementById('quitModal').classList.remove('open'); window.electron.cancelQuit();">إلغاء</button>
@@ -537,6 +554,14 @@ async function loadShiftSummary() {
   if (s.totalSalesVodafone > 0) {
     document.getElementById('vodafoneSection').classList.add('show');
     document.getElementById('vodafoneExpected').textContent = formatNum(s.expectedVodafone);
+  }
+
+  // Show instapay section if there were instapay transactions
+  if (s.expectedInstapay > 0) {
+    document.getElementById('instapaySection').classList.add('show');
+    document.getElementById('instapayCardRow').style.display = '';
+    document.getElementById('instapaySales').textContent = formatNum(s.expectedInstapay);
+    document.getElementById('instapayExpected').textContent = formatNum(s.expectedInstapay);
   }
 }
 
@@ -606,10 +631,11 @@ async function executeEndShift() {
 
   const actualCash = parseFloat(document.getElementById('actualCash').value) || 0;
   const actualVodafone = parseFloat(document.getElementById('actualVodafone').value) || 0;
+  const actualInstapay = parseFloat(document.getElementById('actualInstapay').value) || 0;
   const notes = document.getElementById('shiftNotes').value.trim();
 
   try {
-    const result = await window.shift.end(parseInt(shiftId), actualCash, actualVodafone, notes);
+    const result = await window.shift.end(parseInt(shiftId), actualCash, actualVodafone, actualInstapay, notes);
 
     if (!result.success) {
       showToast(result.error || 'حدث خطأ', 'error');
@@ -654,6 +680,7 @@ async function executeEndShift() {
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>العهدة الافتتاحية:</span><span>${formatNum(summaryData.shift.opening_cash || 0)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>مبيعات نقدي:</span><span>${formatNum(summaryData.totalSalesCash)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>مبيعات فودافون:</span><span>${formatNum(summaryData.totalSalesVodafone)}</span></div>
+        ${summaryData.expectedInstapay > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>مبيعات إنستا باي:</span><span>${formatNum(summaryData.expectedInstapay)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>مرتجعات:</span><span>${formatNum(summaryData.totalReturns)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>مصروفات الخزينة:</span><span>${formatNum(summaryData.totalExpenses)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>إجمالي السلف:</span><span>${formatNum(summaryData.totalAdvances || 0)}</span></div>
@@ -661,6 +688,11 @@ async function executeEndShift() {
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>الخزينة (متوقع):</span><span>${formatNum(summaryData.expectedCash)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>الخزينة (فعلي):</span><span>${formatNum(actualCash)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>الفرق:</span><span>${formatNum(actualCash - summaryData.expectedCash)}</span></div>
+        ${summaryData.expectedInstapay > 0 ? `
+        <div style="border-top:1px dashed #000;margin:5px 0;"></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>إنستا باي (متوقع):</span><span>${formatNum(summaryData.expectedInstapay)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>إنستا باي (فعلي):</span><span>${formatNum(actualInstapay)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px;font-weight:bold;"><span>فرق إنستا باي:</span><span>${formatNum(actualInstapay - summaryData.expectedInstapay)}</span></div>` : ''}
         <div style="border-top:1px dashed #000;margin:5px 0;"></div>
         ${treasuryDetailsHTML}
         <div style="text-align:center;font-size:10px;margin-top:10px;">تم إغلاق الشيفت</div>

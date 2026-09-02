@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>EL-TARZY — شئون الموظفين</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -276,6 +274,29 @@
         </div>
 
         <!-- جدول السجلات -->
+        <div class="card mb-4">
+          <div class="card-header"><div class="card-title">تقرير الحضور والانصراف</div></div>
+          <div class="flex gap-2 mb-3" style="align-items:flex-end;">
+            <div style="flex:1;">
+              <label class="form-label">الموظف</label>
+              <select id="attFilterEmp" class="form-control">
+                <option value="">الكل</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label class="form-label">من تاريخ</label>
+              <input type="date" id="attFilterFrom" class="form-control" />
+            </div>
+            <div style="flex:1;">
+              <label class="form-label">إلى تاريخ</label>
+              <input type="date" id="attFilterTo" class="form-control" />
+            </div>
+            <div>
+              <button class="btn btn-primary" onclick="loadAttendance()">فلتر</button>
+            </div>
+          </div>
+        </div>
+
         <div class="table-wrapper">
           <table>
             <thead><tr><th>الموظف</th><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>تأخير (دق)</th><th>زيادة (دق)</th><th>حذف</th></tr></thead>
@@ -332,6 +353,7 @@
               <select id="adv_treasury" class="form-control">
                 <option value="الخزينة">الخزينة النقدية</option>
                 <option value="فودافون كاش">فودافون كاش</option>
+                <option value="إنستا باي">إنستا باي</option>
               </select>
             </div>
             <div class="form-group">
@@ -343,10 +365,46 @@
             <button class="btn btn-success" onclick="saveAdvance()">تسجيل السلفة</button>
           </div>
         </div>
+        
+        <div class="card mb-4">
+          <div class="card-header">
+            <div class="card-title">تقرير السلف</div>
+            <div class="header-actions">
+              <button class="btn btn-outline btn-sm" id="btnAdvPrintA4" onclick="printAdvancesReport('a4')" style="display:none;">🖨️ طباعة A4</button>
+              <button class="btn btn-outline btn-sm" id="btnAdvPrintThermal" onclick="printAdvancesReport('thermal')" style="display:none;">🖨️ طباعة حراري</button>
+            </div>
+          </div>
+          <div class="flex gap-2 mb-3" style="align-items:flex-end;">
+            <div style="flex:1;">
+              <label class="form-label">الموظف</label>
+              <select id="advFilterEmp" class="form-control">
+                <option value="">الكل</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label class="form-label">من تاريخ</label>
+              <input type="date" id="advFilterFrom" class="form-control" />
+            </div>
+            <div style="flex:1;">
+              <label class="form-label">إلى تاريخ</label>
+              <input type="date" id="advFilterTo" class="form-control" />
+            </div>
+            <div>
+              <button class="btn btn-primary" onclick="loadAdvances()">فلتر</button>
+            </div>
+          </div>
+        </div>
+
         <div class="table-wrapper">
           <table>
             <thead><tr><th>الموظف</th><th>المبلغ</th><th>التاريخ</th><th>ملاحظات</th><th>حذف</th></tr></thead>
             <tbody id="advancesBody"><tr><td colspan="6" class="table-empty">لا توجد سلف</td></tr></tbody>
+            <tfoot id="advancesFoot" style="display:none;">
+              <tr class="total-row">
+                <td style="font-weight:700;">الإجمالي</td>
+                <td colspan="4" style="color:var(--danger);font-weight:700;" id="advancesTotal">0.00 جنيه</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -559,9 +617,13 @@
           <label class="form-label">💵 الخزينة النقدية (جنيه)</label>
           <input type="number" id="payCashAmount" class="form-control" min="0" step="0.01" value="0" oninput="syncPaySplit('cash')" />
         </div>
-        <div class="form-group">
+        <div class="form-group mb-2">
           <label class="form-label">📱 فودافون كاش (جنيه)</label>
           <input type="number" id="payVodafoneAmount" class="form-control" min="0" step="0.01" value="0" oninput="syncPaySplit('vodafone')" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">🏦 إنستا باي (جنيه)</label>
+          <input type="number" id="payInstapayAmount" class="form-control" min="0" step="0.01" value="0" oninput="syncPaySplit('instapay')" />
         </div>
         <div id="paySplitHint" style="font-size:11px;color:var(--text-muted);margin-top:6px;"></div>
       </div>

@@ -1,5 +1,5 @@
 
-function fmt(n){ return Number(n||0).toLocaleString('ar-EG', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmt(n){ return Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 function switchTab(tabId, btn) {
@@ -16,7 +16,7 @@ function switchTab(tabId, btn) {
 }
 
 // ─── Date Init ────────────────────────────────────────────────────────────────
-const today = new Date().toISOString().split('T')[0];
+const today = getLocalISODate();
 const firstDay = today.slice(0,7) + '-01';
 
 document.getElementById('salesFrom').value = firstDay;
@@ -51,21 +51,30 @@ async function loadSalesReport() {
                     c.name as customer_name,
                     e.name as emp_name,
                     t.name as tailor_name,
-                    (i.net_total - COALESCE((SELECT SUM(total_returned) FROM returns WHERE original_invoice_id = i.id), 0)) as dynamic_net_total
+                    (i.net_total - COALESCE(rr.total_returned, 0)) as dynamic_net_total
              FROM invoices i 
              LEFT JOIN customers c ON i.customer_id = c.id 
              LEFT JOIN employees e ON i.employee_id = e.id
              LEFT JOIN employees t ON i.tailor_id = t.id
+             LEFT JOIN (SELECT original_invoice_id, SUM(total_returned) as total_returned FROM returns GROUP BY original_invoice_id) rr ON rr.original_invoice_id = i.id
              WHERE 1=1`;
   const params = [];
+
+  // ─── منطق البحث + التاريخ ──────────────────────────────────────────────────
+  // لو البحث برقم فاتورة (أرقام أو يبدأ بحرف/رقم) → ابحث في كل الفواتير بدون قيد التاريخ
+  // لو البحث باسم عميل فقط → خلي شرط التاريخ شغال
+  const isInvoiceNumberSearch = search && (search.toLowerCase().includes('inv') || /\d/.test(search)); // يحتوي على أرقام أو كلمة inv
 
   if(search) {
     sql += ` AND (i.invoice_number LIKE ? OR c.name LIKE ?)`;
     params.push(`%${search}%`, `%${search}%`);
   }
-  
-  sql += ` AND i.invoice_date BETWEEN ? AND ?`;
-  params.push(from || '2000-01-01', to || '2099-12-31');
+
+  // شرط التاريخ: يُطبَّق دائماً إلا لو كان البحث برقم فاتورة
+  if(!isInvoiceNumberSearch) {
+    sql += ` AND i.invoice_date BETWEEN ? AND ?`;
+    params.push(from || '2000-01-01', to || '2099-12-31');
+  }
   
   if(statusFilter === 'غير مسددة') {
     sql += ` AND i.remaining > 0`;
@@ -203,13 +212,15 @@ async function changeInvoiceStatus(id, currentStatus, remainingAmount) {
       const inv = invRes.data;
       const waStatus = await window.whatsapp.getStatus();
       if (waStatus.ready) {
-        await window.whatsapp.sendDeliveredWithFullPayment({
+        const waRes = await window.whatsapp.sendDelivered({
           phone: inv.customer_phone,
           customerName: inv.customer_name || 'عميلنا العزيز',
           invoiceNumber: inv.invoice_number,
-          paid: fmt(remainingAmount),
-          paymentMethod: safeType === 'فودافون كاش' ? 'تحويل' : 'نقدي',
         });
+        if (!waRes.success) {
+          showToast('فشل إرسال واتساب: ' + waRes.error, 'warning');
+          console.error('[WhatsApp]', waRes.error);
+        }
       }
     }
     return; // خروج لعدم إرسال رسائل أخرى
@@ -297,11 +308,15 @@ async function sendDeliveredWhatsApp(invoiceId) {
   if (!inv.customer_phone || inv.customer_phone.trim() === '' || inv.customer_phone === 'null') return;
   const waStatus = await window.whatsapp.getStatus();
   if (!waStatus.ready) return;
-  await window.whatsapp.sendDelivered({
+  const res = await window.whatsapp.sendDelivered({
     phone: inv.customer_phone,
     customerName: inv.customer_name,
     invoiceNumber: inv.invoice_number,
   });
+  if (!res.success) {
+    showToast('فشل إرسال واتساب: ' + res.error, 'warning');
+    console.error('[WhatsApp]', res.error);
+  }
 }
 
 async function payInvoiceDebt(id, maxAmount) {
@@ -608,8 +623,8 @@ async function reprintPastInvoice(inv) {
 
     const safeLogo = settings.logo_path ? 'file:///' + settings.logo_path.replace(/\\/g, '/') : '';
     const logoHTML = safeLogo ? `<div style="text-align:center;margin-bottom:4px;"><img src="${safeLogo}" style="width:100%;max-height:130px;object-fit:contain;"></div>` : '';
-    const addressHTML = settings.address ? `<div style="text-align:center;font-size:10px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
-    const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:10px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
+    const addressHTML = settings.address ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
+    const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
     
     const tailorHTML = (settings.show_tailor_name && inv.emp_name) ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخياط:</span><span style="font-weight:700;">${inv.emp_name}</span></div>` : '';
     const custNameHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">العميل:</span><span style="font-weight:700;">${inv.customer_name || 'عميل نقدي'}</span></div>`;
@@ -622,15 +637,15 @@ async function reprintPastInvoice(inv) {
     const custPhoneHTML = custPhone ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">ت.العميل:</span><span style="font-weight:700;">${custPhone}</span></div>` : '';
     
     const notesStr = inv.notes || '';
-    const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:10px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
-    const settingsNotesHTML = settings.receipt_notes ? `<div style="text-align:center;font-size:10px;margin-top:4px;font-weight:700;">${settings.receipt_notes}</div>` : '';
+    const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:12px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
+    const settingsNotesHTML = settings.receipt_notes ? `<div style="text-align:center;font-size:12px;margin-top:4px;font-weight:700;">${settings.receipt_notes}</div>` : '';
 
     const receiptHTML = `
       <div class="receipt" style="
         width:68mm;
         box-sizing:border-box;
         font-family:'Cairo',Arial,sans-serif;
-        font-size:11px;
+        font-size:13px;
         font-weight:700;
         color:#000;
         direction:rtl;
@@ -642,7 +657,7 @@ async function reprintPastInvoice(inv) {
       ">
         ${logoHTML}
         <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'EL-Tarzy'}</div>
-        <div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
+        <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
         ${addressHTML}
         ${phoneHTML}
         <div style="border-top:2px dashed #000;margin:6px 0;"></div>
@@ -652,7 +667,7 @@ async function reprintPastInvoice(inv) {
         ${custPhoneHTML}
         ${tailorHTML}
         <div style="border-top:2px dashed #000;margin:6px 0;"></div>
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-weight:700;table-layout:fixed;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;font-weight:700;table-layout:fixed;">
           <colgroup>
             <col style="width:8%;">
             <col style="width:40%;">
@@ -674,13 +689,13 @@ async function reprintPastInvoice(inv) {
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الإجمالي:</span><span style="font-weight:700;">${subtotal} ${settings.currency||'جنيه'}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخصم:</span><span style="font-weight:700;">${discount} ${settings.currency||'جنيه'}</span></div>
         <div style="border-top:1px solid #000;margin:4px 0;"></div>
-        <div style="display:flex;justify-content:space-between;font-weight:900;font-size:13px;margin-bottom:3px;"><span>الصافي:</span><span>${net} ${settings.currency||'جنيه'}</span></div>
+        <div style="display:flex;justify-content:space-between;font-weight:900;font-size:16px;margin-bottom:3px;"><span>الصافي:</span><span>${net} ${settings.currency||'جنيه'}</span></div>
         <div style="border-top:1px solid #000;margin:4px 0;"></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">المدفوع:</span><span style="font-weight:700;">${paid} ${settings.currency||'جنيه'}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الباقي:</span><span style="font-weight:900;">${remaining} ${settings.currency||'جنيه'}</span></div>
         ${invoiceNotesHTML}
         <div style="border-top:2px dashed #000;margin:8px 0;"></div>
-        <div style="text-align:center;font-weight:900;font-size:11px;">${settings.receipt_footer||'شكراً لزيارتكم'}</div>
+        <div style="text-align:center;font-weight:900;font-size:13px;">${settings.receipt_footer||'شكراً لزيارتكم'}</div>
         ${settingsNotesHTML}
       </div>`;
 
@@ -746,12 +761,18 @@ async function applyRoleVisibility() {
 
 window.electron.onConfirmBackupBeforeQuit(() => {
   Swal.fire({
-    title: 'إغلاق البرنامج', text: 'هل تريد إنشاء نسخة احتياطية قبل الخروج؟', icon: 'question',
-    showDenyButton: true, showCancelButton: true, confirmButtonText: 'نسخ وخروج', denyButtonText: 'خروج بدون نسخة', cancelButtonText: 'إلغاء'
-  }).then((r) => {
-    if (r.isConfirmed) window.electron.quitWithBackup();
-    else if (r.isDenied) window.electron.quitWithoutBackup();
-    else window.electron.cancelQuit();
+    title: 'إغلاق البرنامج',
+    html: `
+      <p style="font-size:14px;font-weight:600;margin-bottom:8px;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
+        <button class="btn btn-primary" onclick="Swal.close(); sendDailyReportAndQuit();">إرسال التقرير وإنهاء</button>
+        <button class="btn btn-success" onclick="Swal.close(); window.electron.quitWithBackup();">نسخ وخروج</button>
+        <button class="btn btn-danger" onclick="Swal.close(); window.electron.quitWithoutBackup();">خروج بدون نسخة</button>
+        <button class="btn btn-outline" onclick="Swal.close(); window.electron.cancelQuit();">إلغاء</button>
+      </div>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false
   });
 });
 

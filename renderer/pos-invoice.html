@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>EL-TARZY — نقطة البيع والفواتير</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -279,7 +277,7 @@
       body > *:not(.receipt-print) { display: none !important; }
       .receipt-print {
         display: block !important;
-        position: fixed !important;
+        position: static !important;
         top: 0 !important;
         right: 0 !important;
         width: 72mm !important;
@@ -375,6 +373,7 @@
         <select id="treasuryType" style="min-width:130px;">
           <option value="الخزينة">الخزينة</option>
           <option value="فودافون كاش">فودافون كاش</option>
+          <option value="إنستا باي">إنستا باي</option>
         </select>
       </div>
     </div>

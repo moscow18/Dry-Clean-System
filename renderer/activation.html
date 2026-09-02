@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>EL-TARZY — تفعيل النظام</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <style>
     :root {
       --accent:      #1B2A4A;
@@ -244,7 +242,7 @@
     /* ─── Serial Input ─── */
     .serial-inputs {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr auto;
+      grid-template-columns: 1fr 1fr 1fr 1fr 1fr auto;
       gap: 8px;
       align-items: end;
     }
@@ -377,7 +375,11 @@
     </div>
     <div class="serial-group">
       <label>الكود 4</label>
-      <input type="text" class="serial-input" id="serial4" maxlength="5" placeholder="XXXXX" oninput="handleSerialInput(this,null)" />
+      <input type="text" class="serial-input" id="serial4" maxlength="5" placeholder="XXXXX" oninput="handleSerialInput(this,'serial5')" />
+    </div>
+    <div class="serial-group">
+      <label style="color:var(--gold);">الكود 5 (مؤقت)</label>
+      <input type="text" class="serial-input" id="serial5" maxlength="5" placeholder="أيام" oninput="handleSerialInput(this,null)" style="opacity:0.75;" />
     </div>
     <button class="activate-btn" id="activateBtn" onclick="doActivate()">✅ تفعيل</button>
   </div>
@@ -418,13 +420,18 @@
         title.textContent = 'النظام مفعّل ✅';
         banner.className = 'status-banner';
         icon.textContent = '✅';
-        msg.textContent  = 'النظام مفعّل بالكامل — شكراً لثقتك!';
+        if (status.isTimed && status.activationExpiry) {
+          const expiryDate = new Date(status.activationExpiry).toLocaleDateString('ar-EG');
+          msg.textContent = `النظام مفعّل مؤقتاً — ينتهي في ${expiryDate} (باقي ${status.daysLeft} يوم)`;
+        } else {
+          msg.textContent = 'النظام مفعّل بالكامل — شكراً لثقتك!';
+        }
         backBtn.style.display = 'block';
       } else if (status.trialExpired) {
-        title.textContent = 'انتهت فترة التجربة';
+        title.textContent = 'تفعيل النظام';
         banner.className = 'status-banner expired';
-        icon.textContent = '⏰';
-        msg.textContent  = 'انتهت فترة التجربة المجانية (7 أيام). أرسل الكودين أعلاه للحصول على مفتاح التفعيل.';
+        icon.textContent = '🔒';
+        msg.textContent  = 'النظام غير مفعل. أرسل الكودين أعلاه للحصول على مفتاح التفعيل.';
         backBtn.style.display = 'block'; // السماح بالرجوع للداشبورد (وضع القراءة فقط)
       } else {
         title.textContent = 'تفعيل النظام';
@@ -474,13 +481,15 @@
     const s2 = document.getElementById('serial2').value.trim();
     const s3 = document.getElementById('serial3').value.trim();
     const s4 = document.getElementById('serial4').value.trim();
+    const s5 = document.getElementById('serial5').value.trim();
 
     if (!s1 || !s2 || !s3 || !s4) {
-      showFeedback('يرجى إدخال مفتاح التفعيل كاملاً في الخانات الأربعة', 'error');
+      showFeedback('يرجى إدخال مفتاح التفعيل كاملاً في الخانات الأربع على الأقل', 'error');
       return;
     }
 
-    const serial = `${s1}-${s2}-${s3}-${s4}`;
+    // لو الكود الخامس موجود → تفعيل مؤقت (5 أجزاء)، وإلا → تفعيل دائم (4 أجزاء)
+    const serial = s5 ? `${s1}-${s2}-${s3}-${s4}-${s5}` : `${s1}-${s2}-${s3}-${s4}`;
     const btn    = document.getElementById('activateBtn');
     btn.disabled = true;
     btn.textContent = '⏳ جاري التحقق...';
@@ -488,16 +497,23 @@
     try {
       const result = await window.activation.activate(serial);
       if (result.success) {
-        showFeedback('✅ تم التفعيل بنجاح! سيتم فتح البرنامج الآن...', 'success');
-        ['serial1','serial2','serial3','serial4'].forEach(id => {
-          document.getElementById(id).classList.add('success');
+        const msg = result.activatedDays
+          ? `✅ تم التفعيل بنجاح! النظام مفعّل لمدة ${result.activatedDays} يوم. سيتم فتح البرنامج الآن...`
+          : '✅ تم التفعيل بنجاح! سيتم فتح البرنامج الآن...';
+        showFeedback(msg, 'success');
+        ['serial1','serial2','serial3','serial4','serial5'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.classList.add('success');
         });
         setTimeout(() => window.electron.navigate('login.html'), 1800);
       } else {
         showFeedback(result.error || 'مفتاح التفعيل غير صحيح، يرجى التحقق من الكود', 'error');
-        ['serial1','serial2','serial3','serial4'].forEach(id => {
-          document.getElementById(id).classList.add('error');
-          setTimeout(() => document.getElementById(id).classList.remove('error'), 2000);
+        ['serial1','serial2','serial3','serial4','serial5'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.classList.add('error');
+            setTimeout(() => el.classList.remove('error'), 2000);
+          }
         });
         btn.disabled  = false;
         btn.textContent = '✅ تفعيل';

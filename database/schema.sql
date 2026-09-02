@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS employees (
   is_active INTEGER DEFAULT 1,
   commission_percent REAL DEFAULT 0,
   salary_type TEXT DEFAULT 'ثابت',
+  monthly_leave_days INTEGER DEFAULT 2,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -344,7 +345,21 @@ CREATE TABLE IF NOT EXISTS company_settings (
   receipt_notes TEXT,
   show_tailor_name INTEGER DEFAULT 1,
   show_customer_phone INTEGER DEFAULT 1,
-  currency TEXT DEFAULT 'جنيه'
+  currency TEXT DEFAULT 'جنيه',
+  prevent_cashier_price_edit INTEGER DEFAULT 0,
+  cashier_hide_reports INTEGER DEFAULT 0,
+  cashier_hide_hr INTEGER DEFAULT 0,
+  cashier_prevent_returns INTEGER DEFAULT 0,
+  cashier_hide_finance INTEGER DEFAULT 0,
+  cashier_prevent_discount INTEGER DEFAULT 0,
+  cashier_prevent_settings INTEGER DEFAULT 0,
+  wa_phone1 TEXT DEFAULT '',
+  wa_phone2 TEXT DEFAULT '',
+  wa_tpl_invoice_confirm TEXT DEFAULT '',
+  wa_tpl_order_ready TEXT DEFAULT '',
+  wa_tpl_delivered TEXT DEFAULT '',
+  wa_tpl_full_payment TEXT DEFAULT '',
+  wa_tpl_partial_payment TEXT DEFAULT ''
 );
 
 -- invoice sequence counter
@@ -362,4 +377,31 @@ CREATE TABLE IF NOT EXISTS backups (
   file_size_kb REAL,
   backup_type TEXT DEFAULT 'يدوي',
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- إعدادات الواتساب (Multi-Provider)
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL DEFAULT 'web_js',
+  wa_phone_number_id TEXT,
+  wa_access_token TEXT,
+  wa_business_account_id TEXT,
+  wa_api_version TEXT DEFAULT 'v20.0',
+  web_session_client_id TEXT DEFAULT 'el-tarzy-whatsapp',
+  web_session_path TEXT,
+  is_active INTEGER DEFAULT 1,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- خريطة قوالب الواتساب
+CREATE TABLE IF NOT EXISTS whatsapp_template_map (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  logical_key TEXT NOT NULL UNIQUE,
+  actual_template_name TEXT NOT NULL,
+  language_code TEXT DEFAULT 'ar'
+);
+
+-- جدول تتبع الـ migrations
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY
 );

@@ -1,0 +1,44 @@
+{
+  "appId": "com.deltatech.eltarzy",
+  "productName": "El-Tarzy",
+  "electronVersion": "22.3.27",
+  "asar": true,
+  "compression": "maximum",
+  "files": [
+    "**/*",
+    "!.git{,/**}",
+    "!.gitignore",
+    "!.install.id",
+    "!testData{,/**}",
+    "!**/*.md",
+    "!dist{,/**}",
+    "!dist-win7{,/**}",
+    "!.wwebjs_cache{,/**}",
+    "!**/*.map",
+    "!node_modules/.cache{,/**}",
+    "!scripts{,/**}",
+    "!list-tables.js",
+    "!electron-builder.win7.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64",
+          "ia32"
+        ]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "El-Tarzy"
+  },
+  "directories": {
+    "output": "dist-win7"
+  }
+}

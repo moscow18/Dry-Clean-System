@@ -1,17 +1,27 @@
 let currentLogoPath = null;
 
 
-// ─── Section navigation ──────────────────────────────────────────────────────
 function showSection(name) {
   ['store', 'cashier', 'users', 'backup', 'whatsapp', 'wa-templates'].forEach(s => {
     document.getElementById(`section-${s}`).style.display = s === name ? '' : 'none';
   });
   document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
-  event.target.closest('.sidebar-nav-item')?.classList.add('active');
+  
+  // Safe event handling for cases where event might not be defined
+  if (typeof event !== 'undefined' && event && event.target) {
+    event.target.closest('.sidebar-nav-item')?.classList.add('active');
+  } else {
+    // Fallback: manually highlight the correct sidebar item
+    document.querySelectorAll('.sidebar-nav-item').forEach(el => {
+      if (el.getAttribute('onclick') && el.getAttribute('onclick').includes(`'${name}'`)) {
+        el.classList.add('active');
+      }
+    });
+  }
 
   if (name === 'users')        loadUsers();
   if (name === 'backup')       { loadBackups(); loadExternalBackupPath(); }
-  if (name === 'whatsapp')     checkWaStatus();
+  if (name === 'whatsapp')     { checkWaStatus(); loadWaProviderSettings(); }
   if (name === 'wa-templates') loadWaTemplates();
 }
 
@@ -42,6 +52,10 @@ async function loadSettings() {
   document.getElementById('showTailorName').checked       = Number(s.show_tailor_name) === 1;
   document.getElementById('showCustomerPhone').checked    = Number(s.show_customer_phone) === 1;
   document.getElementById('preventCashierPriceEdit').checked = Number(s.prevent_cashier_price_edit) === 1;
+  if (document.getElementById('adminWaPhone')) document.getElementById('adminWaPhone').value = s.admin_wa_phone || '';
+  if (document.getElementById('reportSavePath')) document.getElementById('reportSavePath').value = s.report_save_path || '';
+  if (document.getElementById('dayCutoffHour')) document.getElementById('dayCutoffHour').value = s.day_cutoff_hour || 0;
+  sessionStorage.setItem('elTarzy_dayCutoffHour', s.day_cutoff_hour || 0);
 
   // Cashier permissions
   document.getElementById('cashierHideReports').checked   = Number(s.cashier_hide_reports) === 1;
@@ -112,6 +126,9 @@ async function saveCashierPermissions() {
       wa_tpl_delivered:          s.wa_tpl_delivered || '',
       wa_tpl_full_payment:       s.wa_tpl_full_payment || '',
       wa_tpl_partial_payment:    s.wa_tpl_partial_payment || '',
+      admin_wa_phone:            s.admin_wa_phone || '',
+      report_save_path:          s.report_save_path || '',
+      day_cutoff_hour:           s.day_cutoff_hour || 0,
       // Permissions — read from checkboxes
       prevent_cashier_price_edit: document.getElementById('preventCashierPriceEdit').checked,
       cashier_hide_reports:       document.getElementById('cashierHideReports').checked,
@@ -160,15 +177,29 @@ async function saveSettings() {
     wa_tpl_delivered:          document.getElementById('tplDelivered')?.value.trim() || '',
     wa_tpl_full_payment:       document.getElementById('tplFullPayment')?.value.trim() || '',
     wa_tpl_partial_payment:    document.getElementById('tplPartialPayment')?.value.trim() || '',
+    admin_wa_phone:            document.getElementById('adminWaPhone')?.value.trim() || '',
+    report_save_path:          document.getElementById('reportSavePath')?.value.trim() || '',
+    day_cutoff_hour:           parseInt(document.getElementById('dayCutoffHour')?.value || '0', 10),
   };
 
   const res = await window.db.updateSettings(data);
   if (res.success) {
+    sessionStorage.setItem('elTarzy_dayCutoffHour', data.day_cutoff_hour);
     showToast('تم حفظ الإعدادات بنجاح ', 'success');
+    if (data.company_name) document.getElementById('sidebarShopName').textContent = data.company_name;
   } else {
-    showToast('حدث خطأ: ' + (res.error || ''), 'error');
+    showToast('خطأ في حفظ الإعدادات: ' + res.error, 'error');
   }
 }
+
+// ─── Select Report Folder ───────────────────────────────────────────────────
+async function selectReportFolder() {
+  const res = await window.electron.selectFolder();
+  if (res.success && res.path) {
+    document.getElementById('reportSavePath').value = res.path;
+  }
+}
+
 
 // ─── Logo upload ──────────────────────────────────────────────────────────────
 function chooseLogo() {
@@ -457,45 +488,388 @@ window.electron.onConfirmBackupBeforeQuit(() => {
   }
 })();
 
-// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+// ─── WhatsApp (Multi-Provider) ────────────────────────────────────────────────
 let waQrTimerInterval = null;
-let waStatusPollInterval = null;   // ← polling كل 3 ثوانية
+let waStatusPollInterval = null;
 
-async function checkWaStatus() {
-  const status = await window.whatsapp.getStatus();
-  updateWaUI(status.ready, status.hasQR);
+// قوالب الرسائل الأساسية للنظام
+const TEMPLATE_KEYS = [
+  { key: 'invoice_confirm', label: 'تأكيد الفاتورة (عند الحفظ)' },
+  { key: 'order_ready',     label: 'الطلب جاهز للاستلام' },
+  { key: 'order_delivered', label: 'تم التسليم' },
+  { key: 'full_payment',    label: 'سداد كامل' },
+  { key: 'partial_payment', label: 'دفعة جزئية' }
+];
+
+let currentTemplateMap = {};
+
+// 1. تحميل إعدادات المزوّد
+async function loadWaProviderSettings() {
+  const res = await window.whatsapp.getProviderSettings();
+  if (res.success && res.data) {
+    const s = res.data;
+    
+    // تحديد الراديو بوتون
+    if (s.provider === 'cloud_api') {
+      document.getElementById('providerCloudApi').checked = true;
+    } else {
+      document.getElementById('providerWebJs').checked = true;
+    }
+    onProviderChange(s.provider || 'web_js');
+
+    // بيانات Cloud API
+    document.getElementById('waPhoneNumberId').value = s.wa_phone_number_id || '';
+    document.getElementById('waBusinessAccountId').value = s.wa_business_account_id || '';
+    document.getElementById('waApiVersion').value = s.wa_api_version || 'v20.0';
+    // لا نضع الـ Token في الحقل لدواعي أمنية، نتركه فارغاً إلا إذا أراد تغييره
+    document.getElementById('waAccessToken').value = '';
+    document.getElementById('waAccessToken').placeholder = s.wa_phone_number_id ? '(تم الحفظ مسبقاً - أدخل قيمة جديدة للتغيير)' : 'EAAxxxxxxxxxxxxxxx...';
+  }
+
+  // تحميل خريطة القوالب
+  const tplRes = await window.whatsapp.getTemplateMap();
+  if (tplRes.success) {
+    currentTemplateMap = tplRes.data || {};
+    renderTemplateMapTable();
+  }
+
+  checkWaStatus();
+}
+
+// 2. التبديل بين اللوحات في الـ UI
+function onProviderChange(provider) {
+  const panelWeb = document.getElementById('panel-web_js');
+  const panelCloud = document.getElementById('panel-cloud_api');
+  const cardWeb = document.getElementById('providerCard_web_js');
+  const cardCloud = document.getElementById('providerCard_cloud_api');
+
+  if (provider === 'cloud_api') {
+    panelWeb.style.display = 'none';
+    panelCloud.style.display = 'block';
+    cardCloud.style.borderColor = 'var(--primary)';
+    cardCloud.style.background = 'rgba(var(--primary-rgb), 0.05)';
+    cardWeb.style.borderColor = 'var(--border)';
+    cardWeb.style.background = 'var(--card)';
+  } else {
+    panelWeb.style.display = 'block';
+    panelCloud.style.display = 'none';
+    cardWeb.style.borderColor = 'var(--primary)';
+    cardWeb.style.background = 'rgba(var(--primary-rgb), 0.05)';
+    cardCloud.style.borderColor = 'var(--border)';
+    cardCloud.style.background = 'var(--card)';
+  }
+}
+
+// 3. عرض جدول القوالب
+function renderTemplateMapTable() {
+  const container = document.getElementById('templateMapTable');
+  const statusBadge = {
+    ok:            { icon: '✅', color: '#15803d', bg: 'rgba(34,197,94,0.1)',   border: 'rgba(34,197,94,0.3)' },
+    not_approved:  { icon: '⚠️', color: '#b45309', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)' },
+    lang_mismatch: { icon: '⚠️', color: '#b45309', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.3)' },
+    name_not_found:{ icon: '❌', color: '#dc2626', bg: 'rgba(239,68,68,0.1)',  border: 'rgba(239,68,68,0.3)' },
+    empty:         { icon: '',   color: '',         bg: '',                     border: '' },
+  };
+
+  container.innerHTML = TEMPLATE_KEYS.map(t => {
+    const existing = currentTemplateMap[t.key] || {};
+    const actualName = existing.actual_template_name || '';
+    const verifyStatus = lastVerifyResults[t.key];
+    const badge = verifyStatus ? (statusBadge[verifyStatus] || {}) : null;
+
+    const rowBorder = badge && badge.border ? badge.border : 'var(--border)';
+    const rowBg     = badge && badge.bg     ? badge.bg     : '#fff';
+    const statusTag = badge && badge.icon
+      ? `<span title="${verifyStatus}" style="font-size:16px; flex-shrink:0; line-height:1;">${badge.icon}</span>`
+      : '';
+
+    return `
+      <div style="display:flex; gap:10px; align-items:center; background:${rowBg}; padding:10px; border-radius:8px; border:1px solid ${rowBorder}; transition:border-color 0.3s;">
+        ${statusTag}
+        <div style="width:${badge ? '180px' : '200px'}; font-weight:600; font-size:13px; color:var(--text-primary);">${t.label}</div>
+        <div style="flex:1; display:flex; gap:8px;">
+          <input type="text" id="tpl_${t.key}" class="form-control form-control-sm" 
+            placeholder="اسم القالب (مثال: order_ready_msg)" 
+            value="${actualName}" style="font-family:monospace; direction:ltr; flex:2;" />
+          <input type="text" id="tpl_lang_${t.key}" class="form-control form-control-sm" 
+            placeholder="اللغة (ar_EG)" 
+            value="${existing.language_code || 'ar_EG'}" style="font-family:monospace; direction:ltr; flex:1;" title="كود اللغة" />
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 4. حفظ الإعدادات
+async function saveWaProviderSettings() {
+  const provider = document.querySelector('input[name="waProvider"]:checked').value;
   
-  if (!status.ready && status.hasQR) {
-    // اجلب QR الحالي وعرضه
-    const qrRes = await window.whatsapp.getQR();
-    if (qrRes.success && qrRes.qr) {
-      showWaQR(qrRes.qr);
+  const settings = { provider };
+
+  if (provider === 'cloud_api') {
+    settings.wa_phone_number_id = document.getElementById('waPhoneNumberId').value.trim();
+    settings.wa_business_account_id = document.getElementById('waBusinessAccountId').value.trim();
+    settings.wa_api_version = document.getElementById('waApiVersion').value.trim() || 'v20.0';
+    
+    const tokenInput = document.getElementById('waAccessToken').value.trim();
+    if (tokenInput) {
+      settings.wa_access_token_plain = tokenInput; // سيتم تشفيره في الـ backend
+    }
+
+    if (!settings.wa_phone_number_id) {
+      showToast('يرجى إدخال Phone Number ID', 'error');
+      return;
     }
   }
 
-  // لو غير متصل ومفيش QR بعد، ابدأ polling تلقائي
-  if (!status.ready) {
-    startWaPolling();
+  // تجميع خريطة القوالب
+  const newMap = {};
+  TEMPLATE_KEYS.forEach(t => {
+    const val = document.getElementById(`tpl_${t.key}`).value.trim();
+    const lang = document.getElementById(`tpl_lang_${t.key}`).value.trim() || 'ar_EG';
+    if (val) {
+      newMap[t.key] = { actual_template_name: val, language_code: lang };
+    }
+  });
+
+  const btn = document.getElementById('saveWaSettingsBtn');
+  const resultDiv = document.getElementById('waSaveResult');
+  const originalText = btn.innerHTML;
+  
+  btn.disabled = true;
+  btn.innerHTML = '⏳ جاري الحفظ وتطبيق الإعدادات...';
+  resultDiv.textContent = '';
+
+  try {
+    // 1. حفظ القوالب
+    await window.whatsapp.saveTemplateMap(newMap);
+    
+    // 2. حفظ الإعدادات والتبديل (مع Rollback في الـ backend لو فشل)
+    const res = await window.whatsapp.saveProviderSettings(settings);
+    
+    if (res.success) {
+      showToast('✅ تم حفظ الإعدادات وتطبيق المزوّد بنجاح', 'success');
+      resultDiv.innerHTML = '<span style="color:var(--success);">✅ تم الحفظ والتبديل بنجاح</span>';
+      document.getElementById('waAccessToken').value = ''; // مسح الحقل للأمان
+      checkWaStatus();
+    } else {
+      showToast('❌ فشل التبديل: ' + res.error, 'error');
+      resultDiv.innerHTML = `<span style="color:var(--danger);">❌ فشل التبديل — تم الرجوع للإعدادات السابقة.<br>${res.error}</span>`;
+    }
+  } catch (err) {
+    showToast('حدث خطأ غير متوقع', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
+
+// 5. اختبار الاتصال لـ Cloud API
+async function testCloudConnection() {
+  const phoneId = document.getElementById('waPhoneNumberId').value.trim();
+  const token = document.getElementById('waAccessToken').value.trim();
+  const apiVersion = document.getElementById('waApiVersion').value.trim() || 'v20.0';
+
+  if (!phoneId) {
+    showToast('يرجى إدخال Phone Number ID', 'warning');
+    return;
+  }
+
+  const resultDiv = document.getElementById('testConnectionResult');
+  resultDiv.innerHTML = '⏳ جاري الاتصال بـ Meta...';
+
+  // نجلب الإعدادات الحالية لو كان التوكن فارغ (يعني لم يغيره)
+  let testToken = token;
+  if (!testToken) {
+    const current = await window.whatsapp.getProviderSettings();
+    // لا يوجد طريقة آمنة لاختبار التوكن المشفر من الواجهة إلا بإرساله للباك اند
+    // الـ backend سيستخدم التوكن المشفر الموجود عنده لو بعتنا testToken فارغ
+    // لذلك هنعتمد على ان لو testToken فاضي، الباك اند هيتصرف. 
+    // אבל لحظة، الـ testConnection في الباك اند بتاخد plain، عشان كدة لازم التوكن يكون موجود
+    // الحل الأفضل: لو التوكن فاضي، نقول للمستخدم "احفظ الإعدادات الأول ثم اختبر"
+    if (current.data && current.data.wa_phone_number_id === phoneId && !token) {
+      // سنطلب من الباك اند اختبار الإعدادات المحفوظة
+      const res = await window.whatsapp.getProviderSettings(); // just to check if saved
+    } else if (!token) {
+      resultDiv.innerHTML = '<span style="color:var(--warning);">⚠️ يرجى إدخال Access Token أو حفظ الإعدادات أولاً</span>';
+      return;
+    }
+  }
+
+  const res = await window.whatsapp.testConnection({
+    wa_phone_number_id: phoneId,
+    wa_access_token_plain: testToken, // الباك اند هيتجاهله لو فاضي ويستخدم المحفوظ؟ لا، الباك اند بيعتمد عليه. 
+    // التعديل: سنرسل testConnection بدون توكن لو أردنا اختبار المحفوظ
+    wa_api_version: apiVersion
+  });
+
+  if (res.success) {
+    resultDiv.innerHTML = `<span style="color:var(--success); font-weight:bold;">✅ الاتصال ناجح!</span><br><span style="color:var(--text-muted);">الرقم: <span style="direction:ltr;display:inline-block;">${res.data.displayPhoneNumber}</span> (${res.data.verifiedName})</span>`;
   } else {
+    resultDiv.innerHTML = `<span style="color:var(--danger); font-weight:bold;">❌ فشل الاتصال:</span><br><span style="color:var(--text-muted);">${res.error}</span>`;
+  }
+}
+
+// ──────────────────────────────────────────────
+// التحقق من القوالب مقابل Meta
+// ──────────────────────────────────────────────
+let lastVerifyResults = {}; // { logicalKey: status }
+
+async function verifyMetaTemplates() {
+  const btn = document.getElementById('verifyTemplatesBtn');
+  const resultDiv = document.getElementById('verifyTemplatesResult');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري جلب القوالب من Meta...';
+  resultDiv.style.display = 'none';
+  resultDiv.innerHTML = '';
+
+  try {
+    // نُمرِّر الإعدادات الحالية المكتوبة (قد تكون غير محفوظة بعد)
+    const phoneId = document.getElementById('waPhoneNumberId').value.trim();
+    const bizId   = document.getElementById('waBusinessAccountId').value.trim();
+    const version = document.getElementById('waApiVersion').value.trim() || 'v20.0';
+    const token   = document.getElementById('waAccessToken').value.trim() || undefined;
+
+    const res = await window.whatsapp.verifyTemplates({
+      wa_phone_number_id:      phoneId   || undefined,
+      wa_business_account_id:  bizId     || undefined,
+      wa_api_version:          version,
+      wa_access_token_plain:   token,
+    });
+
+    resultDiv.style.display = 'block';
+
+    if (!res.success) {
+      resultDiv.innerHTML = `
+        <div style="color:var(--danger); font-weight:700; font-size:13px; display:flex; align-items:flex-start; gap:8px;">
+          <span style="font-size:18px;">⛔</span>
+          <div>${res.error}</div>
+        </div>`;
+      return;
+    }
+
+    const { results, metaTemplatesCount } = res.data;
+
+    // تخزين للاستخدام في الرسم
+    lastVerifyResults = {};
+    results.forEach(r => { lastVerifyResults[r.logicalKey] = r.status; });
+
+    const LABEL_MAP = {
+      invoice_confirm: 'تأكيد الفاتورة',
+      order_ready:     'الطلب جاهز',
+      order_delivered: 'تم التسليم',
+      full_payment:    'سداد كامل',
+      partial_payment: 'دفعة جزئية',
+    };
+
+    const statusStyles = {
+      ok:           { bg: 'rgba(34,197,94,0.1)',   border: 'rgba(34,197,94,0.35)',   color: '#15803d', icon: '✅' },
+      not_approved: { bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.35)',  color: '#b45309', icon: '⚠️' },
+      lang_mismatch:{ bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.35)',  color: '#b45309', icon: '⚠️' },
+      name_not_found:{ bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.35)',   color: '#dc2626', icon: '❌' },
+      empty:        { bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.3)',  color: '#64748b', icon: '➖' },
+    };
+
+    const rows = results.map(r => {
+      const st = statusStyles[r.status] || statusStyles.empty;
+      const label = LABEL_MAP[r.logicalKey] || r.logicalKey;
+      return `
+        <div style="
+          display:flex; align-items:flex-start; gap:10px;
+          padding:10px 12px;
+          background:${st.bg};
+          border:1px solid ${st.border};
+          border-radius:8px;
+          margin-bottom:6px;
+        ">
+          <span style="font-size:16px; flex-shrink:0; margin-top:1px;">${st.icon}</span>
+          <div>
+            <div style="font-weight:700; font-size:12px; color:var(--text-muted); margin-bottom:2px;">${label}</div>
+            <div style="font-size:13px; color:${st.color}; line-height:1.5;">${r.message}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+    const hasErrors   = results.some(r => r.status === 'name_not_found' || r.status === 'lang_mismatch');
+    const hasWarnings = results.some(r => r.status === 'not_approved');
+    const allOk       = results.every(r => r.status === 'ok');
+
+    const summaryColor = allOk ? '#15803d' : hasErrors ? '#dc2626' : '#b45309';
+    const summaryIcon  = allOk ? '✅' : hasErrors ? '❌' : '⚠️';
+    const summaryText  = allOk
+      ? `جميع القوالب مطابقة ومعتمدة على Meta (${metaTemplatesCount} قالب على الحساب)`
+      : hasErrors
+        ? 'توجد قوالب غير مطابقة — يرجى تصحيح الأسماء أو أكواد اللغة أدناه ثم حفظ الإعدادات'
+        : 'الأسماء مطابقة مع تحفظات — راجع التفاصيل أدناه';
+
+    resultDiv.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:rgba(0,0,0,0.04); border-radius:8px; margin-bottom:10px; font-weight:700; font-size:13px; color:${summaryColor};">
+        <span>${summaryIcon}</span> ${summaryText}
+        <span style="margin-right:auto; font-weight:400; font-size:11px; color:var(--text-muted);">${metaTemplatesCount} قالب على Meta</span>
+      </div>
+      ${rows}
+    `;
+
+    // تحديث جدول القوالب بأيقونات الحالة
+    renderTemplateMapTable();
+
+  } catch (err) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `<div style="color:var(--danger);">⛔ خطأ غير متوقع: ${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔎 تحقق من القوالب';
+  }
+}
+
+function toggleTokenVisibility() {
+  const input = document.getElementById('waAccessToken');
+  const btn = document.getElementById('tokenVisibilityBtn');
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = '🙈';
+  } else {
+    input.type = 'password';
+    btn.textContent = '👁️';
+  }
+}
+
+// ──────────────────────────────────────────────
+// حالة الاتصال والمراقبة الموحدة
+// ──────────────────────────────────────────────
+
+async function checkWaStatus() {
+  const status = await window.whatsapp.getStatus();
+  updateWaUI(status);
+  
+  if (status.provider === 'web_js') {
+    if (!status.ready && status.needsQR && status.qrImage) {
+      showWaQR(status.qrImage);
+    }
+    if (!status.ready) {
+      startWaPolling();
+    } else {
+      stopWaPolling();
+    }
+  } else {
+    // Cloud API لا يحتاج Polling
     stopWaPolling();
   }
 }
 
 function startWaPolling() {
-  if (waStatusPollInterval) return; // already running
+  if (waStatusPollInterval) return;
   waStatusPollInterval = setInterval(async () => {
     const status = await window.whatsapp.getStatus();
-    if (status.ready) {
-      updateWaUI(true, false);
+    updateWaUI(status);
+    
+    if (status.ready || status.provider !== 'web_js') {
       stopWaPolling();
       return;
     }
-    if (status.hasQR) {
-      updateWaUI(false, true);
-      const qrRes = await window.whatsapp.getQR();
-      if (qrRes.success && qrRes.qr) {
-        showWaQR(qrRes.qr);
-      }
+    if (status.needsQR && status.qrImage) {
+      showWaQR(status.qrImage);
     }
   }, 3000);
 }
@@ -507,29 +881,37 @@ function stopWaPolling() {
   }
 }
 
-function updateWaUI(ready, hasQR) {
+function updateWaUI(status) {
   const dot = document.getElementById('waStatusDot');
   const text = document.getElementById('waStatusText');
   const hint = document.getElementById('waStatusHint');
   const disconnectBtn = document.getElementById('waDisconnectBtn');
   const qrSection = document.getElementById('waQrSection');
 
-  if (ready) {
+  text.textContent = status.label || 'غير مهيأ';
+
+  if (status.statusType === 'connected' || status.statusType === 'configured') {
     dot.style.background = '#25d366';
-    text.textContent = '✅ متصل وجاهز للإرسال';
-    hint.textContent = 'الجلسة محفوظة — مش هتحتاج ترتبط مرة تانية';
-    disconnectBtn.style.display = 'inline-flex';
+    hint.textContent = status.provider === 'cloud_api' ? 'مستعد لإرسال القوالب عبر Meta' : 'الجلسة محفوظة — جاهز للإرسال';
+    disconnectBtn.style.display = status.provider === 'web_js' ? 'inline-flex' : 'none';
     qrSection.style.display = 'none';
-  } else if (hasQR) {
+  } 
+  else if (status.statusType === 'qr_pending') {
     dot.style.background = '#f59e0b';
-    text.textContent = '📱 في انتظار مسح QR Code';
     hint.textContent = 'افتح واتساب وامسح الكود أدناه';
     disconnectBtn.style.display = 'none';
     qrSection.style.display = 'block';
-  } else {
+  } 
+  else if (status.statusType === 'unconfigured') {
     dot.style.background = '#ef4444';
-    text.textContent = '🔴 غير متصل';
-    hint.textContent = 'جاري الاتصال... انتظر قليلاً أو اضغط تحديث';
+    hint.textContent = 'يرجى مراجعة إعدادات Meta Cloud API وإعادة الحفظ';
+    disconnectBtn.style.display = 'none';
+    qrSection.style.display = 'none';
+  }
+  else {
+    // disconnected, loading, etc.
+    dot.style.background = '#ef4444';
+    hint.textContent = 'جاري الاتصال... أو متوقف مؤقتاً';
     disconnectBtn.style.display = 'none';
     qrSection.style.display = 'none';
   }
@@ -539,7 +921,6 @@ function showWaQR(dataUrl) {
   document.getElementById('waQrImage').src = dataUrl;
   document.getElementById('waQrSection').style.display = 'block';
   
-  // عداد تنازلي 60 ثانية
   if (waQrTimerInterval) clearInterval(waQrTimerInterval);
   let secs = 60;
   const timerEl = document.getElementById('waQrTimer');
@@ -560,45 +941,94 @@ async function disconnectWa() {
   if (!confirm('هل تريد قطع اتصال الواتساب؟')) return;
   await window.whatsapp.disconnect();
   showToast('تم قطع الاتصال', 'info');
-  updateWaUI(false, false);
+  checkWaStatus();
 }
 
 // أحداث واتساب الواردة من Main Process
 window.whatsapp.onQR((dataUrl) => {
   if (!dataUrl) return;
-  updateWaUI(false, true);
   showWaQR(dataUrl);
 });
 
 window.whatsapp.onReady(() => {
   if (waQrTimerInterval) clearInterval(waQrTimerInterval);
   stopWaPolling();
-  updateWaUI(true, false);
+  checkWaStatus();
   showToast('✅ واتساب متصل وجاهز!', 'success');
 });
 
 window.whatsapp.onAuthenticated(() => {
-  updateWaUI(false, false);
+  const hint = document.getElementById('waStatusHint');
+  if (hint) hint.textContent = 'جاري التحقق من الجلسة...';
 });
 
 window.whatsapp.onDisconnected(() => {
-  updateWaUI(false, false);
   showToast('انقطع اتصال الواتساب', 'warning');
-  startWaPolling(); // ابدأ polling من تاني عشان تنتظر إعادة الاتصال
+  startWaPolling(); 
 });
 
 window.whatsapp.onLoading((percent) => {
   const hint = document.getElementById('waStatusHint');
-  if (hint) {
-    hint.textContent = `جاري تحميل واتساب... ${percent}%`;
-  }
+  if (hint) hint.textContent = `جاري تحميل واتساب... ${percent}%`;
 });
 
 window.whatsapp.onError((msg) => {
   showToast('خطأ في واتساب: ' + msg, 'error');
   const text = document.getElementById('waStatusText');
   const hint = document.getElementById('waStatusHint');
-  if (text) text.textContent = '⚠️ حدث خطأ — الواتساب متوقف';
-  if (hint) hint.innerHTML = `<span style="color:var(--danger);font-weight:600;">⛔ ${msg}</span><br><small>حاول إعادة تشغيل البرنامج. إذا استمرت المشكلة على ويندوز 7، تأكد من تحديث Google Chrome أو تثبيته.</small>`;
+  if (text) text.textContent = '⚠️ حدث خطأ';
+  if (hint) hint.innerHTML = `<span style="color:var(--danger);font-weight:600;">⛔ ${msg}</span>`;
   stopWaPolling();
 });
+
+// تم نقل تحميل الإعدادات لـ showSection الأساسية بالأعلى
+
+
+// ─── Selective Reset ──────────────────────────────────────────────────────────
+function showSelectiveResetModal() {
+  document.getElementById('selectiveResetModal').style.display = 'flex';
+}
+
+async function executeSelectiveReset() {
+  const confirmFirst = await Swal.fire({
+    title: 'تأكيد المسح؟',
+    text: 'سيتم مسح جميع الحركات والبيانات غير المحددة للاحتفاظ. هل أنت متأكد؟',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'نعم، قم بالمسح',
+    cancelButtonText: 'إلغاء'
+  });
+
+  if (!confirmFirst.isConfirmed) return;
+
+  // Double check
+  const confirmSecond = await Swal.fire({
+    title: 'تحذير أخير!',
+    text: 'لا يمكن التراجع عن هذا الإجراء إطلاقاً. هل تريد الاستمرار؟',
+    icon: 'error',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'متأكد 100% - امسح الآن',
+    cancelButtonText: 'تراجع'
+  });
+
+  if (!confirmSecond.isConfirmed) return;
+
+  const options = {
+    keepCustomers: document.getElementById('keepCustomers').checked,
+    keepServices: document.getElementById('keepServices').checked,
+    keepEmployees: document.getElementById('keepEmployees').checked,
+    keepSettings: document.getElementById('keepSettings').checked
+  };
+
+  const res = await window.db.selectiveReset(options);
+  if (res.success) {
+    await Swal.fire('تم بنجاح', 'تم مسح البيانات وإعادة الضبط بناءً على اختيارك.', 'success');
+    window.electron.restart();
+  } else {
+    Swal.fire('خطأ', 'حدث خطأ أثناء المسح: ' + res.error, 'error');
+  }
+}

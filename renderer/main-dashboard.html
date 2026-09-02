@@ -278,6 +278,13 @@
           </div>
         </div>
         <div class="stat-card">
+          <div class="stat-icon" style="background:var(--accent-light);"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent);"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
+          <div class="stat-body">
+            <div class="stat-value" id="dailyNetInstapay">0</div>
+            <div class="stat-label">صافي إنستا باي اليوم</div>
+          </div>
+        </div>
+        <div class="stat-card">
           <div class="stat-icon red"></div>
           <div class="stat-body">
             <div class="stat-value" id="todayExpenses">0</div>
@@ -303,7 +310,7 @@
       <!-- Main Action Buttons -->
       <div class="section-label">العمليات الرئيسية</div>
       <div class="actions-grid">
-        <button class="action-btn blue" id="btnAttendance" onclick="handleAttendance()">
+        <button class="action-btn blue" id="btnAttendance" onclick="handleAttendance('in')">
           <div class="action-btn-icon">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           </div>
@@ -347,7 +354,7 @@
           <div class="action-btn-label">إدارة الشركاء</div>
         </button>
 
-        <button class="action-btn red" id="btnCheckout" onclick="handleCheckout()">
+        <button class="action-btn red" id="btnCheckout" onclick="handleAttendance('out')">
           <div class="action-btn-icon">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 8 8 12 12 16"/><line x1="16" y1="12" x2="8" y2="12"/></svg>
           </div>
@@ -390,7 +397,7 @@
       <button class="quick-btn" onclick="navigate('pos-invoice.html')" title="F1">
         <span class="key-badge">F1</span> فاتورة سريعة
       </button>
-      <button class="quick-btn" onclick="navigate('reports.html')" title="F2">
+      <button class="quick-btn" onclick="navigate('daily-report.html')" title="F2">
         <span class="key-badge">F2</span> تقرير يومي
       </button>
       <button class="quick-btn" onclick="navigate('finance.html')" title="F3">
@@ -580,7 +587,8 @@
       <p style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
       <p style="font-size:12px;color:var(--text-muted);">سيتم حفظ نسخة من قاعدة البيانات تلقائياً</p>
     </div>
-    <div class="modal-footer" style="justify-content:center;gap:8px;">
+    <div class="modal-footer" style="justify-content:center;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="sendDailyReportAndQuit()" style="width:100%;margin-bottom:8px;">إرسال التقرير وإنهاء</button>
       <button class="btn btn-success" onclick="window.electron.quitWithBackup()">نسخ وخروج</button>
       <button class="btn btn-danger" onclick="window.electron.quitWithoutBackup()">خروج بدون نسخة</button>
       <button class="btn btn-outline" onclick="document.getElementById('quitModal').classList.remove('open'); window.electron.cancelQuit();">إلغاء</button>
@@ -592,7 +600,7 @@
 <div class="modal-overlay" id="attendanceModal">
   <div class="modal modal-sm" style="max-width:400px;">
     <div class="modal-header">
-      <div class="modal-title">تسجيل حضور / انصراف</div>
+      <div class="modal-title" id="attModalTitle">تسجيل حضور / انصراف</div>
       <button class="modal-close" onclick="closeModal('attendanceModal')">&times;</button>
     </div>
     <div class="modal-body">
@@ -604,18 +612,19 @@
         <label class="form-label">التاريخ</label>
         <input type="date" class="form-control" id="attDate">
       </div>
-      <div class="form-group">
+      <div class="form-group" id="attTimeInGroup">
         <label class="form-label">وقت الحضور</label>
         <input type="time" class="form-control" id="attTimeIn">
       </div>
-      <div class="form-group">
-        <label class="form-label">وقت الانصراف (اختياري)</label>
+      <div class="form-group" id="attTimeOutGroup">
+        <label class="form-label">وقت الانصراف</label>
         <input type="time" class="form-control" id="attTimeOut">
       </div>
     </div>
     <div class="modal-footer" style="justify-content:center;gap:10px;">
-      <button class="btn btn-primary" onclick="saveDashboardAttendance()">تسجيل حضور</button>
-      <button class="btn btn-warning" onclick="saveDashboardCheckout()">تسجيل انصراف</button>
+      <button class="btn btn-primary" id="btnSubmitAttIn" onclick="saveDashboardAttendance()">تسجيل حضور</button>
+      <button class="btn btn-warning" id="btnSubmitAttOut" onclick="saveDashboardCheckout()">تسجيل انصراف</button>
+      <button class="btn btn-outline" id="btnSubmitAttOutAll" onclick="saveDashboardCheckoutAll()" style="display:none; color:var(--warning); border-color:var(--warning);">انصراف للكل</button>
     </div>
   </div>
 </div>

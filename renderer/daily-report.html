@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>EL-TARZY — التقرير اليومي الشامل</title>
+  <link rel="stylesheet" href="../styles/global.css" />
+  <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
+  <style>
+    /* ═══════════════════════════════════════════════════════
+       SCREEN LAYOUT
+    ═══════════════════════════════════════════════════════ */
+    * { box-sizing: border-box; }
+    body { font-family: var(--font); background: #f2f4f8; margin: 0; }
+    .rpt-wrap { max-width: 1050px; margin: 0 auto; padding: 18px 14px; }
+
+    /* ── Top toolbar (screen only — hidden in print) ───── */
+    .rpt-toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; margin-bottom: 16px; gap: 10px; flex-wrap: wrap;
+    }
+    .rpt-toolbar-title { font-size: 18px; font-weight: 900; color: var(--text); }
+    .rpt-toolbar-sub   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .rpt-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    .btn-wa {
+      background: #25D366; color: #fff; border: none; border-radius: 50px;
+      padding: 8px 16px; font-family: var(--font); font-size: 13px;
+      font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;
+      transition: 0.2s;
+    }
+    .btn-wa:hover { background: #1da851; }
+    .btn-wa:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Print-only header (hidden on screen) ─────────── */
+    .print-header {
+      display: none;
+      text-align: center;
+      border-bottom: 2px solid #000;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .print-header .ph-title { font-size: 16pt; font-weight: 900; }
+    .print-header .ph-sub   { font-size: 10pt; color: #333; margin-top: 2px; }
+
+    /* ── Summary cards ────────────────────────────────── */
+    .sum-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px;
+    }
+    .sum-card {
+      background: #fff; border-radius: 10px; padding: 14px 16px;
+      border: 1px solid #e4e8ef; text-align: center;
+    }
+    .sum-card .s-lbl { font-size: 11px; color: #777; font-weight: 600; margin-bottom: 6px; }
+    .sum-card .s-val { font-size: 20px; font-weight: 900; }
+
+    /* ── Treasury cards (3 only) ──────────────────────── */
+    .trs-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px;
+    }
+    .trs-card {
+      background: #fff; border-radius: 10px; padding: 14px 18px;
+      border: 1px solid #e4e8ef; text-align: center;
+    }
+    .trs-card .t-lbl { font-size: 11px; color: #777; font-weight: 600; margin-bottom: 4px; }
+    .trs-card .t-val { font-size: 20px; font-weight: 900; }
+
+    /* ── Section blocks ───────────────────────────────── */
+    .rpt-section {
+      background: #fff; border-radius: 10px; margin-bottom: 14px;
+      border: 1px solid #e4e8ef; overflow: hidden;
+    }
+    .rpt-sec-title {
+      padding: 10px 18px; font-size: 13px; font-weight: 800;
+      background: #f6f8fb; border-bottom: 1px solid #e4e8ef;
+    }
+    .rpt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .rpt-table th {
+      background: #2d3748; color: #fff;
+      padding: 9px 12px; font-size: 12px; font-weight: 700; text-align: center;
+    }
+    .rpt-table td { padding: 8px 12px; border-bottom: 1px solid #f0f2f5; text-align: center; }
+    .rpt-table tr:last-child td { border-bottom: none; }
+    .rpt-total-row td { background: #2d3748; color: #fff; font-weight: 900; font-size: 13px; }
+    .empty-msg { padding: 18px; text-align: center; color: #aaa; font-size: 13px; }
+
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; }
+    .badge-g { background: #d1fae5; color: #065f46; }
+    .badge-r { background: #fee2e2; color: #991b1b; }
+    .badge-y { background: #fef3c7; color: #92400e; }
+    .badge-b { background: #dbeafe; color: #1e40af; }
+
+    /* ── Colored amounts ──────────────────────────────── */
+    .c-green { color: #16a34a; }
+    .c-red   { color: #dc2626; }
+
+    /* print footer (hidden on screen) */
+    #printFooter { display: none; text-align: center; margin-top: 14px; font-size: 10px; color: #555; border-top: 1px solid #ccc; padding-top: 6px; }
+
+    /* ═══════════════════════════════════════════════════════
+       SHARED PRINT RULES — used by BOTH @media print AND
+       body.print-shared (so printToPDF gets same result as window.print)
+    ═══════════════════════════════════════════════════════ */
+    @media print, screen {
+      body.print-shared { background: #fff !important; }
+      body.print-shared .rpt-wrap            { padding: 10mm !important; max-width: none !important; box-sizing: border-box !important; }
+      body.print-shared .print-header        { display: block !important; }
+      body.print-shared .rpt-toolbar         { display: none !important; }
+      body.print-shared #printFooter         { display: block !important; }
+      
+      body.print-shared .sum-grid            { display: block !important; margin-bottom: 20px !important; }
+      body.print-shared .sum-card            { 
+        display: flex !important; justify-content: space-between !important; 
+        border-bottom: 1px dashed #000 !important; border-radius: 0 !important; 
+        padding: 5px 0 !important; margin-bottom: 0 !important; box-shadow: none !important; background: transparent !important;
+      }
+      body.print-shared .sum-card .s-lbl    { color: #000 !important; font-weight: 700 !important; }
+      body.print-shared .sum-card .s-val    { color: #000 !important; font-weight: 900 !important; }
+      body.print-shared .sum-card .s-icon   { display: none !important; }
+
+      body.print-shared .trs-grid            { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+      body.print-shared .trs-card            { border: 1px solid #000 !important; border-radius: 3px !important; padding: 8px !important; flex: 1 1 45% !important; background: transparent !important; box-shadow: none !important; }
+      body.print-shared .trs-card .t-lbl    { color: #000 !important; }
+      body.print-shared .trs-card .t-val    { color: #000 !important; font-size: 14pt !important; }
+      body.print-shared .c-green             { color: #000 !important; }
+      body.print-shared .c-red               { color: #000 !important; }
+
+      body.print-shared .rpt-section         { border: 1px solid #000 !important; border-radius: 0 !important; margin-bottom: 8px !important; background: transparent !important; box-shadow: none !important; }
+      body.print-shared .rpt-sec-title       { background: transparent !important; color: #000 !important; border-bottom: 1px solid #000 !important; padding: 5px 10px !important; font-weight: bold !important; }
+      body.print-shared .rpt-table th        { background: transparent !important; color: #000 !important; padding: 5px 8px !important; font-size: 9pt !important; border-bottom: 1px solid #000 !important; }
+      body.print-shared .rpt-table td        { padding: 5px 8px !important; border-bottom: 1px solid #ccc !important; font-size: 9pt !important; color: #000 !important; }
+      body.print-shared .rpt-total-row td    { background: transparent !important; color: #000 !important; font-weight: bold !important; border-top: 2px solid #000 !important; border-bottom: none !important; }
+      body.print-shared .badge               { background: none !important; color: #000 !important; border: 1px solid #000 !important; box-shadow: none !important; }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       THERMAL PRINT — 80mm receipt, black & white
+    ═══════════════════════════════════════════════════════ */
+    @media print {
+      body.thermal-mode {
+        font-size: 8pt !important;
+        width: 72mm !important;
+        margin: 0 auto !important; padding: 0 !important;
+      }
+      body.thermal-mode .rpt-wrap    { padding: 0 !important; max-width: 72mm !important; width: 72mm !important; box-sizing: border-box !important; overflow: hidden !important; }
+
+      body.thermal-mode .print-header {
+        display: block !important; border-bottom: 2px solid #000 !important;
+        padding-bottom: 4px !important; margin-bottom: 4px !important; font-size: 8pt !important;
+      }
+      body.thermal-mode .print-header .ph-title { font-size: 9pt !important; font-weight: bold !important; }
+
+      body.thermal-mode .sum-grid {
+        display: block !important; border-bottom: 1px dashed #000 !important;
+        padding-bottom: 3px !important; margin-bottom: 4px !important; gap: 0 !important;
+      }
+      body.thermal-mode .sum-card {
+        display: flex !important; justify-content: space-between !important;
+        border: none !important; padding: 2px 0 !important; border-radius: 0 !important; background: transparent !important;
+      }
+      body.thermal-mode .sum-card .s-lbl { font-size: 8pt !important; font-weight: 700 !important; color: #000 !important; }
+      body.thermal-mode .sum-card .s-val { font-size: 8pt !important; font-weight: 900 !important; color: #000 !important; }
+      body.thermal-mode .sum-card .s-icon { display: none !important; }
+
+      body.thermal-mode .trs-grid {
+        display: block !important; margin-bottom: 4px !important;
+      }
+      body.thermal-mode .trs-card {
+        border: 1px solid #000 !important; border-radius: 2px !important; padding: 3px 6px !important; margin-bottom: 3px !important;
+      }
+      body.thermal-mode .trs-card .t-lbl { font-size: 7.5pt !important; color: #000 !important; }
+      body.thermal-mode .trs-card .t-val { font-size: 8.5pt !important; color: #000 !important; font-weight: bold !important; }
+      body.thermal-mode .rpt-total-row td { background: #000 !important; color: #fff !important; }
+      body.thermal-mode .badge           { border: none !important; padding: 0 !important; font-size: 6.5pt !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="rpt-wrap">
+
+  <!-- ══ Screen toolbar (hidden in print/PDF) ═════════════ -->
+  <div class="rpt-toolbar">
+    <div>
+      <div class="rpt-toolbar-title" id="rptTitle">📊 التقرير اليومي الشامل</div>
+      <div class="rpt-toolbar-sub"   id="rptSubtitle">اختر التاريخ وتحميل البيانات</div>
+    </div>
+    <div class="rpt-actions">
+      <input type="date" id="reportDate" class="form-control" style="min-width:150px;" onchange="loadDailyReport()" />
+      <button class="btn btn-outline btn-sm" onclick="printReport('a4')">🖨️ A4</button>
+      <button class="btn btn-outline btn-sm" onclick="printReport('thermal')">🖨️ حراري</button>
+      <button class="btn btn-outline btn-sm" onclick="savePDFReport()">💾 PDF</button>
+      <button class="btn-wa" id="sendWaBtn" onclick="savePDFAndSend()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.52 3.449A12 12 0 1 0 23 12a11.93 11.93 0 0 0-2.48-7.551zM12 21.5A9.5 9.5 0 1 1 21.5 12 9.51 9.51 0 0 1 12 21.5zm4.29-6.33c-.23-.12-1.36-.67-1.57-.74s-.36-.12-.51.12-.59.74-.72.9-.27.18-.49.06a6.24 6.24 0 0 1-1.84-1.14 6.89 6.89 0 0 1-1.27-1.58c-.14-.23 0-.36.1-.48s.23-.27.35-.41a1.6 1.6 0 0 0 .23-.38.42.42 0 0 0 0-.41c-.06-.12-.51-1.23-.7-1.68s-.37-.38-.51-.39h-.43a.83.83 0 0 0-.6.28 2.52 2.52 0 0 0-.78 1.87 4.38 4.38 0 0 0 .91 2.32 10 10 0 0 0 3.84 3.38 4.32 4.32 0 0 0 2.56.57 2.31 2.31 0 0 0 1.51-1.07 1.87 1.87 0 0 0 .13-1.07c-.07-.1-.24-.16-.47-.28z"/></svg>
+        إرسال PDF للإدارة
+      </button>
+      <button class="btn btn-outline btn-sm" id="backupBtn" onclick="doBackup()" title="نسخة احتياطية">💾 نسخة</button>
+      <button class="btn btn-primary btn-sm" onclick="navigate('main-dashboard.html')" style="border-radius:50px;">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ══ Print-only header (shows in print/PDF instead of toolbar) ═════ -->
+  <div class="print-header">
+    <div class="ph-title" id="printTitle">التقرير اليومي الشامل</div>
+    <div class="ph-sub"   id="printSubtitle">التاريخ: —</div>
+  </div>
+
+  <!-- ══ Summary ═══════════════════════════════════════════ -->
+  <div class="sum-grid">
+    <div class="sum-card">
+      <div class="s-lbl">إجمالي الإيرادات</div>
+      <div class="s-val c-green" id="totIncome">—</div>
+    </div>
+    <div class="sum-card">
+      <div class="s-lbl">إجمالي المصروفات</div>
+      <div class="s-val c-red" id="totExpenses">—</div>
+    </div>
+    <div class="sum-card">
+      <div class="s-lbl">السلف والرواتب</div>
+      <div class="s-val c-red" id="totAdvances">—</div>
+    </div>
+    <div class="sum-card">
+      <div class="s-lbl">صافي الدخل</div>
+      <div class="s-val" id="netIncome">—</div>
+    </div>
+  </div>
+
+  <!-- ══ Treasury (3 — no bank) ════════════════════════════ -->
+  <div class="trs-grid">
+    <div class="trs-card">
+      <div class="t-lbl">💵 الخزينة النقدية</div>
+      <div class="t-val c-green" id="balCash">—</div>
+    </div>
+    <div class="trs-card">
+      <div class="t-lbl">📱 فودافون كاش</div>
+      <div class="t-val" id="balVodafone">—</div>
+    </div>
+    <div class="trs-card">
+      <div class="t-lbl">💳 إنستا باي</div>
+      <div class="t-val" id="balInstapay">—</div>
+    </div>
+  </div>
+
+  <!-- ══ Invoices ═══════════════════════════════════════════ -->
+  <div class="rpt-section">
+    <div class="rpt-sec-title">🧾 فواتير اليوم</div>
+    <div id="invoicesList"><div class="empty-msg">جاري التحميل...</div></div>
+  </div>
+
+  <!-- ══ Today's payments on old invoices ══════════════════ -->
+  <div class="rpt-section" id="oldInvSection" style="display:none;">
+    <div class="rpt-sec-title">💰 تحصيلات اليوم على فواتير قديمة</div>
+    <div id="oldInvList"></div>
+  </div>
+
+  <!-- ══ Expenses + Returns ═════════════════════════════════ -->
+  <div class="rpt-section">
+    <div class="rpt-sec-title">💸 المصروفات والمرتجعات</div>
+    <div id="expensesList"><div class="empty-msg">جاري التحميل...</div></div>
+  </div>
+
+  <!-- ══ Advances & Salaries ════════════════════════════════ -->
+  <div class="rpt-section">
+    <div class="rpt-sec-title">👥 السلف والرواتب</div>
+    <div id="advancesList"><div class="empty-msg">جاري التحميل...</div></div>
+  </div>
+
+  <!-- ══ Attendance ════════════════════════════════════════ -->
+  <div class="rpt-section">
+    <div class="rpt-sec-title">🕐 سجل الحضور والانصراف</div>
+    <div id="attendanceList"><div class="empty-msg">جاري التحميل...</div></div>
+  </div>
+
+  <!-- ══ Revenues (shown if data exists) ══════════════════ -->
+  <div class="rpt-section" id="revenueSection" style="display:none;">
+    <div class="rpt-sec-title">📥 الإيرادات الأخرى</div>
+    <div id="revenuesList"></div>
+  </div>
+
+  <div id="printFooter">تقرير مُصدَّر بواسطة نظام الترزي — EL-Tarzy</div>
+
+</div><!-- /rpt-wrap -->
+
+<!-- Quit Modal -->
+<div class="modal-overlay" id="quitModal">
+  <div class="modal" style="max-width:320px;">
+    <div class="modal-header"><div class="modal-title">الخروج من البرنامج</div></div>
+    <div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:8px;">
+      <button class="btn btn-success" onclick="window.electron.quitWithBackup()">💾 نسخ احتياطي وخروج</button>
+      <button class="btn btn-danger"  onclick="window.electron.quitWithoutBackup()">⚠️ خروج بدون نسخة</button>
+      <button class="btn btn-outline" onclick="document.getElementById('quitModal').classList.remove('open'); window.electron.cancelQuit();">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/shared/common.js"></script>
+<script src="js/daily-report.js"></script>
+</body>
+</html>

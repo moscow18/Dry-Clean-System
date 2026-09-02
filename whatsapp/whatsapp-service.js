@@ -23,14 +23,16 @@ const fs = require('fs');
 
 // دالة للبحث عن مسار متصفح كروم أو إيدج في الويندوز
 function getBrowserPath() {
+    const localAppData = process.env.LOCALAPPDATA || '';
     const paths = [
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        localAppData ? path.join(localAppData, 'Google\\Chrome\\Application\\chrome.exe') : '',
         'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
         'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
     ];
     for (const p of paths) {
-        if (fs.existsSync(p)) return p;
+        if (p && fs.existsSync(p)) return p;
     }
     return null;
 }
@@ -50,7 +52,7 @@ function initWhatsApp(mainWindow, userData) {
             dataPath: path.join(userDataPath, 'whatsapp-sessions'),
         }),
         puppeteer: {
-            headless: true,
+            headless: false,
             executablePath: browserPath || undefined,
             args: [
                 '--no-sandbox',
@@ -62,6 +64,10 @@ function initWhatsApp(mainWindow, userData) {
                 '--disable-gpu',
             ],
         },
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        }
     });
 
     // ── Timeout لتعليق الواتساب على ويندوز 7 ──

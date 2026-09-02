@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>EL-TARZY — الإعدادات</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles/global.css" />
   <style>
     .set-body {
@@ -227,6 +225,35 @@
           <div class="form-group mb-3">
             <label class="form-label">العملة</label>
             <input type="text" id="currency" class="form-control" value="جنيه" />
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label">رقم واتساب الإدارة (لإرسال التقارير اليومية)</label>
+            <input type="text" id="adminWaPhone" class="form-control" placeholder="مثال: 201xxxxxxxxx" />
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label">📁 مجلد حفظ التقارير PDF (اختياري)</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="text" id="reportSavePath" class="form-control" placeholder="اضغط 'اختيار' لتحديد المجلد" readonly />
+              <button class="btn btn-outline" type="button" onclick="selectReportFolder()" style="white-space:nowrap;">📁 اختيار</button>
+              <button class="btn btn-outline" type="button" onclick="document.getElementById('reportSavePath').value=''" style="white-space:nowrap;">✖ مسح</button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">إذا تُرك فارغاً سيُطلب منك اختيار مكان الحفظ في كل مرة</div>
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label">⏰ ساعة تقليب اليوم الجديد (بداية اليوم العملي)</label>
+            <select id="dayCutoffHour" class="form-control">
+              <option value="0">12:00 منتصف الليل (00:00 - افتراضي)</option>
+              <option value="1">01:00 صباحاً</option>
+              <option value="2">02:00 صباحاً</option>
+              <option value="3">03:00 صباحاً</option>
+              <option value="4">04:00 صباحاً</option>
+              <option value="5">05:00 صباحاً</option>
+              <option value="6">06:00 صباحاً</option>
+            </select>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">تحديد الساعة التي يعتبر النظام بعدها أن يوماً جديداً قد بدأ (مفيد إذا كان المحل يغلق بعد منتصف الليل).</div>
           </div>
         </div>
 
@@ -580,14 +607,53 @@
           <div style="margin-top:40px; padding-top:20px; border-top:2px dashed var(--danger);">
             <div class="set-section-title" style="color:var(--danger); border:none; margin-bottom:10px;">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:8px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              منطقة الخطر (إعادة ضبط المصنع)
+              منطقة الخطر (مسح البيانات وإعادة الضبط)
             </div>
             <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6;">
-              هذا الإجراء سيقوم بمسح <strong>كافة بيانات النظام بالكامل</strong> (العملاء، الفواتير، الموظفين، الحسابات) وسيعود البرنامج كأنه جديد. لا يمكن التراجع عن هذا الإجراء إلا لو كان لديك نسخة احتياطية.
+              يمكنك مسح بيانات النظام كلياً أو جزئياً (مثلاً: مسح الفواتير والحركات مع الاحتفاظ بالعملاء والموظفين). لا يمكن التراجع عن هذا الإجراء إلا لو كان لديك نسخة احتياطية.
             </p>
-            <button class="btn btn-danger" onclick="factoryReset()">
-              إعادة ضبط المصنع ومسح كل البيانات
+            <button class="btn btn-danger" onclick="showSelectiveResetModal()">
+              مسح بيانات النظام ...
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Selective Reset Modal -->
+    <div id="selectiveResetModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
+      <div style="background:var(--card); width:500px; max-width:90%; border-radius:12px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+        <div style="padding:16px 20px; background:var(--danger); color:#fff; font-weight:700; display:flex; justify-content:space-between; align-items:center;">
+          <div>مسح بيانات النظام</div>
+          <button onclick="document.getElementById('selectiveResetModal').style.display='none'" style="background:transparent; border:none; color:#fff; font-size:18px; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:20px;">
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px; line-height:1.5;">
+            سيتم مسح جميع الحركات (الفواتير، المرتجعات، السلف، المصروفات، الخزينة، إلخ). يمكنك اختيار ما تريد <strong style="color:var(--success);">الاحتفاظ به</strong> أدناه:
+          </p>
+          
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px; background:var(--bg); padding:16px; border-radius:8px; border:1px solid var(--border);">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="keepCustomers" style="width:16px; height:16px; accent-color:var(--success);" />
+              <span style="font-size:14px; font-weight:600;">الاحتفاظ بـ <span style="color:var(--primary);">العملاء</span></span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="keepServices" style="width:16px; height:16px; accent-color:var(--success);" />
+              <span style="font-size:14px; font-weight:600;">الاحتفاظ بـ <span style="color:var(--primary);">الأصناف والخدمات</span></span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="keepEmployees" style="width:16px; height:16px; accent-color:var(--success);" />
+              <span style="font-size:14px; font-weight:600;">الاحتفاظ بـ <span style="color:var(--primary);">الموظفين</span> (شامل صلاحيات الدخول)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="keepSettings" style="width:16px; height:16px; accent-color:var(--success);" />
+              <span style="font-size:14px; font-weight:600;">الاحتفاظ بـ <span style="color:var(--primary);">الإعدادات العامة وإعدادات الواتساب</span></span>
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button class="btn btn-outline" onclick="document.getElementById('selectiveResetModal').style.display='none'">إلغاء</button>
+            <button class="btn btn-danger" onclick="executeSelectiveReset()">تأكيد ومسح البيانات</button>
           </div>
         </div>
       </div>
@@ -595,17 +661,19 @@
 
     <!-- Section: WhatsApp -->
     <div class="content-area" id="section-whatsapp" style="display:none;">
-      <div style="padding:24px; max-width:600px;">
-        <div class="set-section" style="max-width:100%;">
+      <div style="padding:24px; max-width:750px;">
+
+        <!-- Provider Selector Card -->
+        <div class="set-section" style="max-width:100%; margin-bottom:20px;">
           <div class="set-section-title">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="#25d366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
-            إعدادات الواتساب
+            إعدادات الواتساب — اختر مزوّد الإرسال
           </div>
 
-          <!-- حالة الاتصال -->
-          <div style="display:flex; align-items:center; justify-content:space-between; padding:16px; background:var(--bg); border-radius:var(--radius); margin-bottom:20px;">
+          <!-- حالة الاتصال الموحّدة -->
+          <div id="waStatusCard" style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--bg); border-radius:var(--radius); margin-bottom:20px;">
             <div style="display:flex; align-items:center; gap:12px;">
-              <div id="waStatusDot" style="width:12px;height:12px;border-radius:50%;background:var(--border);flex-shrink:0;"></div>
+              <div id="waStatusDot" style="width:12px;height:12px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.3s;"></div>
               <div>
                 <div id="waStatusText" style="font-weight:700; font-size:14px;">جاري التحقق...</div>
                 <div id="waStatusHint" style="font-size:11px; color:var(--text-muted);">يرجى الانتظار</div>
@@ -616,6 +684,49 @@
               <button class="btn btn-sm btn-danger" id="waDisconnectBtn" onclick="disconnectWa()" style="display:none;">قطع الاتصال</button>
             </div>
           </div>
+
+          <!-- اختيار المزوّد -->
+          <div style="margin-bottom:20px;">
+            <div style="font-size:13px; font-weight:700; margin-bottom:12px; color:var(--text-primary);">🔌 اختر طريقة الإرسال:</div>
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+
+              <label id="providerCard_web_js" style="
+                flex:1; min-width:200px; cursor:pointer;
+                border:2px solid var(--border); border-radius:12px; padding:16px;
+                transition:all 0.2s; background:var(--card);
+              ">
+                <input type="radio" name="waProvider" value="web_js" id="providerWebJs"
+                  onchange="onProviderChange('web_js')" style="display:none;" checked />
+                <div style="font-size:20px; margin-bottom:8px;">📱</div>
+                <div style="font-weight:700; font-size:13px; margin-bottom:4px;">WhatsApp Web</div>
+                <div style="font-size:11px; color:var(--text-muted); line-height:1.6;">
+                  مجاني — عبر QR Code<br>
+                  يحتاج هاتف متصل بالإنترنت
+                </div>
+              </label>
+
+              <label id="providerCard_cloud_api" style="
+                flex:1; min-width:200px; cursor:pointer;
+                border:2px solid var(--border); border-radius:12px; padding:16px;
+                transition:all 0.2s; background:var(--card);
+              ">
+                <input type="radio" name="waProvider" value="cloud_api" id="providerCloudApi"
+                  onchange="onProviderChange('cloud_api')" style="display:none;" />
+                <div style="font-size:20px; margin-bottom:8px;">☁️</div>
+                <div style="font-weight:700; font-size:13px; margin-bottom:4px;">Meta Cloud API</div>
+                <div style="font-size:11px; color:var(--text-muted); line-height:1.6;">
+                  رسمي ومستقر — بدون خطر حظر<br>
+                  يحتاج حساب Meta for Business
+                </div>
+              </label>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ───── لوحة WhatsApp Web ───── -->
+        <div id="panel-web_js" class="set-section" style="max-width:100%; margin-bottom:20px;">
+          <div class="set-section-title">📱 WhatsApp Web — ربط عبر QR Code</div>
 
           <!-- QR Code -->
           <div id="waQrSection" style="display:none; text-align:center; padding:20px; background:var(--bg); border-radius:var(--radius); margin-bottom:20px;">
@@ -629,7 +740,6 @@
             <div id="waQrTimer" style="margin-top:8px; font-size:12px; color:var(--warning);"></div>
           </div>
 
-          <!-- معلومات -->
           <div style="background:var(--bg); border-radius:var(--radius); padding:16px;">
             <div style="font-size:13px; font-weight:700; margin-bottom:10px;">كيف يعمل؟</div>
             <div style="font-size:12px; color:var(--text-muted); line-height:2;">
@@ -640,8 +750,108 @@
               🔒 الجلسة بتتحفظ تلقائياً — مش هتحتاج تربط مرة تانية
             </div>
           </div>
-
         </div>
+
+        <!-- ───── لوحة Cloud API ───── -->
+        <div id="panel-cloud_api" class="set-section" style="max-width:100%; margin-bottom:20px; display:none;">
+          <div class="set-section-title">☁️ Meta Cloud API — بيانات الحساب الرسمي</div>
+
+          <!-- Phone Number ID -->
+          <div class="form-group mb-3">
+            <label class="form-label">Phone Number ID *</label>
+            <input type="text" id="waPhoneNumberId" class="form-control"
+              placeholder="مثال: 123456789012345"
+              style="font-family:monospace; direction:ltr;" />
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+              من Meta Business Suite ← WhatsApp ← API Setup
+            </div>
+          </div>
+
+          <!-- Access Token -->
+          <div class="form-group mb-3">
+            <label class="form-label">Access Token *</label>
+            <div style="position:relative;">
+              <input type="password" id="waAccessToken" class="form-control"
+                placeholder="EAAxxxxxxxxxxxxxxx..."
+                style="font-family:monospace; direction:ltr; padding-left:40px;" />
+              <button onclick="toggleTokenVisibility()" style="
+                position:absolute; left:10px; top:50%; transform:translateY(-50%);
+                background:none; border:none; cursor:pointer; font-size:16px; color:var(--text-muted);
+              " id="tokenVisibilityBtn" title="إظهار/إخفاء">👁️</button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+              ⚠️ يُحفظ مشفَّراً — لا يظهر مرة أخرى بعد الحفظ
+            </div>
+          </div>
+
+          <!-- Business Account ID -->
+          <div class="form-group mb-3">
+            <label class="form-label">WhatsApp Business Account ID (اختياري)</label>
+            <input type="text" id="waBusinessAccountId" class="form-control"
+              placeholder="مثال: 987654321098765"
+              style="font-family:monospace; direction:ltr;" />
+          </div>
+
+          <!-- API Version -->
+          <div class="form-group mb-4">
+            <label class="form-label">إصدار API</label>
+            <input type="text" id="waApiVersion" class="form-control"
+              placeholder="v20.0" value="v20.0"
+              style="font-family:monospace; direction:ltr; max-width:120px;" />
+          </div>
+
+          <!-- زرار اختبار الاتصال -->
+          <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px; padding:14px; background:var(--bg); border-radius:var(--radius); flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm" id="testConnectionBtn" onclick="testCloudConnection()">
+              🔍 اختبار الاتصال (بدون إرسال رسالة)
+            </button>
+            <div id="testConnectionResult" style="font-size:13px; flex:1;"></div>
+          </div>
+
+          <!-- زرار التحقق من القوالب -->
+          <div style="margin-bottom:20px; padding:14px; background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(99,102,241,0.02)); border:1.5px solid rgba(99,102,241,0.2); border-radius:var(--radius);">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <div style="flex:1;">
+                <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:3px;">
+                  🔎 التحقق من القوالب على Meta
+                </div>
+                <div style="font-size:11px; color:var(--text-muted);">
+                  يجلب القوالب الفعلية من حسابك على Meta ويقارنها بما هو مكتوب أدناه — يكتشف أي خطأ في الاسم أو كود اللغة تلقائياً
+                </div>
+              </div>
+              <button class="btn btn-sm" id="verifyTemplatesBtn" onclick="verifyMetaTemplates()"
+                style="background:rgba(99,102,241,0.15); color:#6366f1; border:1px solid rgba(99,102,241,0.35); font-weight:700; white-space:nowrap;">
+                🔎 تحقق من القوالب
+              </button>
+            </div>
+            <div id="verifyTemplatesResult" style="margin-top:12px; display:none;"></div>
+          </div>
+
+          <!-- جدول خريطة القوالب -->
+          <div style="border-top:2px solid var(--border); padding-top:20px; margin-top:8px;">
+            <div style="font-weight:700; font-size:14px; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              📋 ربط القوالب المنطقية بأسماء القوالب الفعلية على Meta
+            </div>
+            <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.7;">
+              اكتب في كل خانة اسم القالب الذي سجّلته على حساب Meta الخاص بك.
+              يجب أن يكون الاسم مطابقاً تماماً (حساس لحالة الأحرف).
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:10px;" id="templateMapTable">
+              <!-- يُنشأ ديناميكياً من JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- زرار الحفظ الرئيسي -->
+        <div style="display:flex; gap:12px; align-items:center;">
+          <button class="btn btn-success btn-lg" id="saveWaSettingsBtn" onclick="saveWaProviderSettings()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            حفظ إعدادات الواتساب
+          </button>
+          <div id="waSaveResult" style="font-size:13px;"></div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -717,7 +927,8 @@
     <div class="modal-body" style="text-align:center;">
       <p style="font-size:14px;font-weight:600;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
     </div>
-    <div class="modal-footer" style="justify-content:center;gap:8px;">
+    <div class="modal-footer" style="justify-content:center;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="sendDailyReportAndQuit()" style="width:100%;margin-bottom:8px;">إرسال التقرير وإنهاء</button>
       <button class="btn btn-success" onclick="window.electron.quitWithBackup()">نسخ وخروج</button>
       <button class="btn btn-danger" onclick="window.electron.quitWithoutBackup()">خروج بدون نسخة</button>
       <button class="btn btn-outline" onclick="document.getElementById('quitModal').classList.remove('open'); window.electron.cancelQuit();">إلغاء</button>

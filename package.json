@@ -1,22 +1,23 @@
 {
   "name": "el-tarzy",
-  "version": "2.1.7",
+  "version": "2.2.3",
   "description": "EL-TARZY",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
+    "build:win7": "electron-builder --config electron-builder.win7.json",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.10.1",
+    "better-sqlite3": "^12.11.1",
     "qrcode": "^1.5.4",
     "sweetalert2": "^11.26.25",
     "whatsapp-web.js": "^1.34.7"
   },
   "devDependencies": {
-    "electron": "^29.0.0",
+    "electron": "^29.4.6",
     "electron-builder": "^24.9.1",
     "electron-rebuild": "^3.2.9"
   },
@@ -25,6 +26,24 @@
   "build": {
     "appId": "com.deltatech.eltarzy",
     "productName": "El-Tarzy",
+    "asar": true,
+    "compression": "maximum",
+    "files": [
+      "**/*",
+      "!.git{,/**}",
+      "!.gitignore",
+      "!.install.id",
+      "!testData{,/**}",
+      "!**/*.md",
+      "!dist{,/**}",
+      "!dist-win7{,/**}",
+      "!.wwebjs_cache{,/**}",
+      "!**/*.map",
+      "!node_modules/.cache{,/**}",
+      "!scripts{,/**}",
+      "!list-tables.js",
+      "!electron-builder.win7.json"
+    ],
     "win": {
       "target": [
         "nsis",
@@ -36,7 +55,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "برنامج الترزي"
+      "shortcutName": "برنامج الترزي",
+      "include": "build/installer.nsh"
     },
     "directories": {
       "output": "dist"

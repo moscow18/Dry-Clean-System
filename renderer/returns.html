@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>EL-TARZY — المرتجعات</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -114,6 +112,7 @@
         <div class="row" style="font-size:14px;"><span>التاريخ:</span><span id="invDate" style="font-weight:600;">—</span></div>
         <div class="row" style="font-size:15px;margin-top:4px;"><span>المبلغ الإجمالي:</span><strong id="invTotal" style="font-size:16px;">0</strong></div>
         <div class="row" style="font-size:15px;"><span>المدفوع:</span><span id="invPaid" style="font-weight:700;color:#e2e8f0;">0</span></div>
+        <div class="row" style="font-size:14px;"><span>خزنة الدفع الأصلية:</span><span id="invTreasury" style="font-weight:700;color:var(--accent);">—</span></div>
       </div>
 
       <!-- Return Summary -->
@@ -131,10 +130,11 @@
           <div class="lbl">قيمة المرتجع (جنيه)</div>
         </div>
         <div class="form-group" style="flex:1;">
-          <label class="form-label">خزنة المرتجع</label>
+          <label class="form-label">خزنة المرتجع <span id="treasuryAutoHint" style="font-size:10px;color:var(--accent);font-weight:600;"></span></label>
           <select id="returnTreasury" class="form-control">
-            <option value="الخزينة">الخزينة (كاش)</option>
+            <option value="الخزينة">الخزينة (نقدي)</option>
             <option value="فودافون كاش">فودافون كاش</option>
+            <option value="إنستا باي">إنستا باي</option>
           </select>
         </div>
         <div class="form-group" style="flex:2;">
@@ -266,6 +266,30 @@ async function loadInvoice(inv) {
   document.getElementById('invDate').textContent = inv.invoice_date;
   document.getElementById('invTotal').textContent = fmt(inv.net_total)+' جنيه';
   document.getElementById('invPaid').textContent = fmt(inv.amount_paid)+' جنيه';
+
+  // ── تحديد خزنة المرتجع تلقائياً من الفاتورة الأصلية ──
+  const origTreasury = inv.treasury_type || 'الخزينة';
+  document.getElementById('invTreasury').textContent = origTreasury;
+
+  // تحديد الـ select تلقائياً
+  const sel = document.getElementById('returnTreasury');
+  // Check if there's already an option matching, otherwise add one
+  let found = false;
+  for (let opt of sel.options) {
+    if (opt.value === origTreasury) { opt.selected = true; found = true; break; }
+  }
+  if (!found) {
+    const newOpt = document.createElement('option');
+    newOpt.value = origTreasury;
+    newOpt.textContent = origTreasury;
+    newOpt.selected = true;
+    sel.insertBefore(newOpt, sel.firstChild);
+  }
+
+  // إظهار تلميح "تم التحديد تلقائياً"
+  const hint = document.getElementById('treasuryAutoHint');
+  hint.textContent = '● تم التحديد تلقائياً';
+  setTimeout(() => { hint.textContent = ''; }, 4000);
 
   // Load items and subtract already returned quantities
   const itemRes = await window.db.query(

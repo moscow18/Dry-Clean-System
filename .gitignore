@@ -113,21 +113,26 @@ dist
 
 # Electron Builder / Dist
 dist/
+dist-win7/
 release/
 out/
 build/
 *.asar
 
-# Local DB
+# Local DB & App Cache / IDs
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
+.wwebjs_cache/
+.wwebjs_auth/
+.install.id
 
 # Temp files
 temp/
 tmp/
+scratch/
 *.tmp
 *.bak
 *.swp

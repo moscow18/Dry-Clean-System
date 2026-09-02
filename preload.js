@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('auth', {
 
 contextBridge.exposeInMainWorld('shift', {
   start: (openingCash) => ipcRenderer.invoke('shift:start', openingCash),
-  end: (shiftId, actualCash, actualVodafone, notes) => ipcRenderer.invoke('shift:end', shiftId, actualCash, actualVodafone, notes),
+  end: (shiftId, actualCash, actualVodafone, actualInstapay, notes) => ipcRenderer.invoke('shift:end', shiftId, actualCash, actualVodafone, actualInstapay, notes),
   getSummary: (shiftId) => ipcRenderer.invoke('shift:getSummary', shiftId),
   getCurrent: () => ipcRenderer.invoke('shift:getCurrent'),
 });
@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('db', {
   query: (sql, params) => ipcRenderer.invoke('db:query', sql, params),
   queryOne: (sql, params) => ipcRenderer.invoke('db:queryOne', sql, params),
   run: (sql, params) => ipcRenderer.invoke('db:run', sql, params),
+  getDailyReport: (date) => ipcRenderer.invoke('db:getDailyReport', date),
 
   // Invoice
   generateInvoiceNumber: () => ipcRenderer.invoke('db:previewInvoiceNumber'),
@@ -70,6 +71,9 @@ contextBridge.exposeInMainWorld('db', {
 
   // Backup (legacy)
   backup: (destPath) => ipcRenderer.invoke('db:backup', destPath),
+
+  // Selective Reset
+  selectiveReset: (options) => ipcRenderer.invoke('db:selectiveReset', options),
 });
 
 contextBridge.exposeInMainWorld('electron', {
@@ -95,6 +99,9 @@ contextBridge.exposeInMainWorld('electron', {
   getLogoPath: (dbPath) => ipcRenderer.invoke('app:getLogoPath', dbPath),
   restart: () => ipcRenderer.invoke('app:restart'),
   factoryReset: () => ipcRenderer.invoke('app:factoryReset'),
+  printToPDF: (path) => ipcRenderer.invoke('app:printToPDF', path),
+  selectFolder: () => ipcRenderer.invoke('app:selectFolder'),
+  generateAndSendReport: (opts) => ipcRenderer.invoke('app:generateAndSendReport', opts),
 
   // Quit flow — listen for backup confirmation from main process
   onConfirmBackupBeforeQuit: (callback) => {
@@ -107,8 +114,11 @@ contextBridge.exposeInMainWorld('electron', {
 
 // ─── WhatsApp API ──────────────────────────────────────────────────────────────
 contextBridge.exposeInMainWorld('whatsapp', {
+  // الحالة والـ QR
   getStatus:                   () => ipcRenderer.invoke('whatsapp:getStatus'),
   getQR:                       () => ipcRenderer.invoke('whatsapp:getQR'),
+
+  // إرسال الرسائل (الـ channels القديمة — لا تتغير)
   send:            (phone, msg) => ipcRenderer.invoke('whatsapp:send', phone, msg),
   sendInvoiceConfirm:       (d) => ipcRenderer.invoke('whatsapp:sendInvoiceConfirm', d),
   sendOrderReady:           (d) => ipcRenderer.invoke('whatsapp:sendOrderReady', d),
@@ -118,6 +128,18 @@ contextBridge.exposeInMainWorld('whatsapp', {
   sendFullPayment:          (d) => ipcRenderer.invoke('whatsapp:sendFullPayment', d),
   sendReminder:             (d) => ipcRenderer.invoke('whatsapp:sendReminder', d),
   disconnect:               () => ipcRenderer.invoke('whatsapp:disconnect'),
+
+  // ─── إدارة المزوّدين (Multi-Provider) ───────────────────────────────────────
+  getProviderSettings: ()    => ipcRenderer.invoke('whatsapp:getSettings'),
+  saveProviderSettings: (s)  => ipcRenderer.invoke('whatsapp:saveSettings', s),
+  testConnection: (cfg)      => ipcRenderer.invoke('whatsapp:testConnection', cfg),
+  getTemplateMap: ()         => ipcRenderer.invoke('whatsapp:getTemplates'),
+  saveTemplateMap: (map)     => ipcRenderer.invoke('whatsapp:saveTemplates', map),
+  verifyTemplates: (cfg)     => ipcRenderer.invoke('whatsapp:verifyTemplates', cfg),
+
+  // إرسال حر لرقم محدد (for admin report etc.)
+  sendMessage:     (phone, msg)              => ipcRenderer.invoke('whatsapp:send', phone, msg),
+  sendFile:        (phone, caption, filePath) => ipcRenderer.invoke('whatsapp:sendFile', phone, caption, filePath),
 
   // أحداث واتساب من Main → Renderer
   onQR:           (cb) => ipcRenderer.on('whatsapp:qr',            (_, data)   => cb(data)),

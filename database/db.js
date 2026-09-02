@@ -35,9 +35,20 @@ function getDb(app) {
   db.pragma('temp_store = MEMORY');      // Use memory for temporary tables
   db.pragma('mmap_size = 300000000');    // Memory-mapped I/O (~300MB)
 
-  migrateSchema();
-  initSchema();
+  initSchema();     // أولاً: أنشئ الجداول لو مش موجودة
+  migrateSchema();  // ثانياً: طبّق الـ migrations (ALTER TABLE وغيرها)
   runSeed();
+
+  // استعادة الشيفت المفتوح تلقائياً في الجلسة الحالية عند إعادة تشغيل البرنامج
+  try {
+    const activeShift = db.prepare("SELECT id FROM shifts WHERE status = 'مفتوح' ORDER BY id DESC LIMIT 1").get();
+    if (activeShift) {
+      currentSession.shiftId = activeShift.id;
+      console.log(`[Shift] Restored active shift ID: ${activeShift.id}`);
+    }
+  } catch (e) {
+    console.error('[Shift] Failed to restore active shift ID:', e);
+  }
 
   return db;
 }
@@ -180,6 +191,76 @@ function migrateSchema() {
         runSafe("CREATE INDEX IF NOT EXISTS idx_expenses_shift_id ON expenses(shift_id)");
         runSafe("CREATE INDEX IF NOT EXISTS idx_attendance_shift_id ON attendance(shift_id)");
       }
+    },
+    {
+      version: 11,
+      run: () => {
+        // جدول إعدادات مزوّد الواتساب — Multi-Provider Support
+        runSafe(`
+          CREATE TABLE IF NOT EXISTS whatsapp_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL DEFAULT 'web_js',
+            wa_phone_number_id TEXT,
+            wa_access_token TEXT,
+            wa_business_account_id TEXT,
+            wa_api_version TEXT DEFAULT 'v20.0',
+            web_session_client_id TEXT DEFAULT 'el-tarzy-whatsapp',
+            web_session_path TEXT,
+            is_active INTEGER DEFAULT 1,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+
+        // إدخال صف افتراضي بـ web_js للعملاء الحاليين (backward compatible)
+        runSafe(`
+          INSERT OR IGNORE INTO whatsapp_settings (id, provider, web_session_client_id)
+          VALUES (1, 'web_js', 'el-tarzy-whatsapp')
+        `);
+
+        // جدول خريطة القوالب المنطقية → الأسماء الفعلية على Meta
+        runSafe(`
+          CREATE TABLE IF NOT EXISTS whatsapp_template_map (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            logical_key TEXT NOT NULL UNIQUE,
+            actual_template_name TEXT NOT NULL,
+            language_code TEXT DEFAULT 'ar'
+          )
+        `);
+      }
+    },
+    {
+      version: 12,
+      run: () => {
+        runSafe("ALTER TABLE company_settings ADD COLUMN admin_wa_phone TEXT DEFAULT ''");
+      }
+    },
+    {
+      version: 13,
+      run: () => {
+        runSafe("ALTER TABLE company_settings ADD COLUMN report_save_path TEXT DEFAULT ''");
+      }
+    },
+    {
+      version: 14,
+      run: () => {
+        runSafe("ALTER TABLE treasury ADD COLUMN shift_id INTEGER REFERENCES shifts(id)");
+        runSafe("ALTER TABLE advances ADD COLUMN shift_id INTEGER REFERENCES shifts(id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_treasury_shift_id ON treasury(shift_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_advances_shift_id ON advances(shift_id)");
+      }
+    },
+    {
+      version: 15,
+      run: () => {
+        runSafe("ALTER TABLE company_settings ADD COLUMN day_cutoff_hour INTEGER DEFAULT 0");
+      }
+    },
+    {
+      version: 16,
+      run: () => {
+        runSafe("ALTER TABLE shifts ADD COLUMN instapay_cash_expected REAL DEFAULT 0");
+        runSafe("ALTER TABLE shifts ADD COLUMN instapay_cash_actual REAL DEFAULT 0");
+      }
     }
   ];
 
@@ -257,24 +338,73 @@ function run(sql, params = []) {
 // ─── Invoice Number Generator ─────────────────────────────────────────────────
 function generateInvoiceNumber() {
   const year = new Date().getFullYear();
-  const row = db.prepare('SELECT * FROM invoice_sequence WHERE id = 1').get();
+  let row = db.prepare('SELECT * FROM invoice_sequence WHERE id = 1').get();
 
   if (!row) {
-    db.prepare('INSERT INTO invoice_sequence (id, last_number, year) VALUES (1, 1, ?)').run(year);
-    return `INV-${year}-0001`;
+    db.prepare('INSERT INTO invoice_sequence (id, last_number, year) VALUES (1, 0, ?)').run(year);
+    row = { last_number: 0, year: year };
   }
 
-  let nextNum = row.year === year ? row.last_number + 1 : 1;
+  let nextNum = row.year === year ? row.last_number : 0;
+  let candidateStr = '';
+  
+  const checkStmt = db.prepare('SELECT id FROM invoices WHERE invoice_number = ?');
+  
+  while (true) {
+    nextNum++;
+    candidateStr = `INV-${year}-${String(nextNum).padStart(4, '0')}`;
+    const exists = checkStmt.get(candidateStr);
+    if (!exists) {
+      break;
+    }
+  }
+
   db.prepare('UPDATE invoice_sequence SET last_number = ?, year = ? WHERE id = 1').run(nextNum, year);
-  return `INV-${year}-${String(nextNum).padStart(4, '0')}`;
+  return candidateStr;
 }
 
 function previewInvoiceNumber() {
   const year = new Date().getFullYear();
-  const row = db.prepare('SELECT * FROM invoice_sequence WHERE id = 1').get();
-  if (!row) return `INV-${year}-0001`;
-  let nextNum = row.year === year ? row.last_number + 1 : 1;
-  return `INV-${year}-${String(nextNum).padStart(4, '0')}`;
+  let row = db.prepare('SELECT * FROM invoice_sequence WHERE id = 1').get();
+  
+  let nextNum = (row && row.year === year) ? row.last_number : 0;
+  let candidateStr = '';
+  
+  const checkStmt = db.prepare('SELECT id FROM invoices WHERE invoice_number = ?');
+  
+  while (true) {
+    nextNum++;
+    candidateStr = `INV-${year}-${String(nextNum).padStart(4, '0')}`;
+    const exists = checkStmt.get(candidateStr);
+    if (!exists) {
+      return candidateStr;
+    }
+  }
+}
+
+// ─── Local Time Helper ───────────────────────────────────────────────────────
+function getLocalISOString(d = new Date()) {
+  const offset = d.getTimezoneOffset() * 60000;
+  const localD = new Date(d.getTime() - offset);
+  return localD.toISOString().replace('T', ' ').substring(0, 19);
+}
+
+// ─── Business Date (يراعي قلب اليوم / day_cutoff_hour) ─────────────────────
+// لو الساعة الحالية أقل من ساعة القلب، نرجع تاريخ أمس (نفس اليوم التجاري السابق)
+function getBusinessDate(d = new Date()) {
+  const offset = d.getTimezoneOffset() * 60000;
+  const localD = new Date(d.getTime() - offset);
+  try {
+    const settings = db.prepare('SELECT day_cutoff_hour FROM company_settings WHERE id = 1').get();
+    const cutoffHour = (settings && settings.day_cutoff_hour) ? parseInt(settings.day_cutoff_hour, 10) : 0;
+    if (cutoffHour > 0 && localD.getUTCHours() < cutoffHour) {
+      // بعد منتصف الليل وقبل ساعة القلب → نحسبها على اليوم السابق
+      localD.setUTCDate(localD.getUTCDate() - 1);
+    }
+  } catch (e) {
+    // لو فشل الاستعلام، نرجع التاريخ الطبيعي بدون تعديل
+  }
+  return localD.toISOString().split('T')[0];
 }
 
 // ─── Treasury helpers ─────────────────────────────────────────────────────────
@@ -285,12 +415,22 @@ function getTreasuryBalance(treasuryType = 'الخزينة') {
   return row ? row.balance_after : 0;
 }
 
-function addTreasuryEntry(type, description, amount, treasuryType = 'الخزينة') {
+function addTreasuryEntry(type, description, amount, treasuryType = 'الخزينة', shiftId = null) {
   const currentBalance = getTreasuryBalance(treasuryType);
   const newBalance = type === 'إيراد' ? currentBalance + amount : currentBalance - amount;
+  
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  const localD = new Date(d.getTime() - offset);
+  const localDate = getBusinessDate(d);     // ← يراعي قلب اليوم
+  const localTime = localD.toISOString().split('T')[1].substring(0, 8);
+
+  const activeShiftId = shiftId || currentSession.shiftId || null;
+
   db.prepare(
-    `INSERT INTO treasury (type, description, amount, balance_after, treasury_type) VALUES (?, ?, ?, ?, ?)`
-  ).run(type, description, amount, newBalance, treasuryType);
+    `INSERT INTO treasury (type, description, amount, balance_after, treasury_type, date, time, shift_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(type, description, amount, newBalance, treasuryType, localDate, localTime, activeShiftId);
+  
   return newBalance;
 }
 
@@ -372,10 +512,12 @@ function startShift(openingCash) {
     return { success: true, data: { shiftId: existing.id, alreadyOpen: true } };
   }
 
+  const startTime = getLocalISOString();
+
   const result = db.prepare(`
-    INSERT INTO shifts (employee_id, user_id, opening_cash, status)
-    VALUES (?, ?, ?, 'مفتوح')
-  `).run(currentSession.employeeId, currentSession.userId, openingCash || 0);
+    INSERT INTO shifts (employee_id, user_id, opening_cash, status, start_time)
+    VALUES (?, ?, ?, 'مفتوح', ?)
+  `).run(currentSession.employeeId, currentSession.userId, openingCash || 0, startTime);
 
   currentSession.shiftId = result.lastInsertRowid;
   return { success: true, data: { shiftId: result.lastInsertRowid, alreadyOpen: false } };
@@ -385,87 +527,105 @@ function getShiftSummary(shiftId) {
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
   if (!shift) return { success: false, error: 'الشيفت غير موجود' };
 
-  // Total returns
-  const returns = db.prepare(`
-    SELECT COALESCE(SUM(total_returned), 0) as total
-    FROM returns WHERE shift_id = ?
-  `).get(shiftId);
+  const shiftStartTimeStr = shift.start_time ? shift.start_time.substring(0, 19) : '';
+  const shiftEndTimeStr = shift.end_time ? shift.end_time.substring(0, 19) : '';
 
-  // Total expenses from treasury during shift
-  const expenses = db.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total
-    FROM expenses WHERE shift_id = ?
-  `).get(shiftId);
-
-  // Invoice count
+  // Invoice count during this shift
   const invCount = db.prepare(`
-    SELECT COUNT(*) as cnt FROM invoices WHERE shift_id = ?
-  `).get(shiftId);
+    SELECT COUNT(*) as cnt FROM invoices WHERE shift_id = ? OR (
+      created_at >= ? AND (? = '' OR created_at <= ?)
+    )
+  `).get(shiftId, shiftStartTimeStr, shiftEndTimeStr, shiftEndTimeStr);
 
-  // Fetch detailed treasury movements for this shift accurately using date/time concatenation
+  // Fetch detailed treasury movements for this shift
   let treasuryDetails = [];
   try {
-    if (shift.start_time) {
-      if (shift.end_time) {
-        treasuryDetails = db.prepare(`
-          SELECT type, description, amount, treasury_type, time, date
-          FROM treasury
-          WHERE (date || ' ' || time) >= ? AND (date || ' ' || time) <= ?
-          ORDER BY date ASC, time ASC
-        `).all(shift.start_time, shift.end_time);
-      } else {
-        treasuryDetails = db.prepare(`
-          SELECT type, description, amount, treasury_type, time, date
-          FROM treasury
-          WHERE (date || ' ' || time) >= ?
-          ORDER BY date ASC, time ASC
-        `).all(shift.start_time);
-      }
+    if (shiftEndTimeStr) {
+      treasuryDetails = db.prepare(`
+        SELECT type, description, amount, treasury_type, time, date, shift_id
+        FROM treasury
+        WHERE shift_id = ? OR (
+          (date || ' ' || time) >= ? AND (date || ' ' || time) <= ?
+        )
+        ORDER BY date ASC, time ASC, id ASC
+      `).all(shiftId, shiftStartTimeStr, shiftEndTimeStr);
+    } else if (shiftStartTimeStr) {
+      treasuryDetails = db.prepare(`
+        SELECT type, description, amount, treasury_type, time, date, shift_id
+        FROM treasury
+        WHERE shift_id = ? OR (
+          (date || ' ' || time) >= ?
+        )
+        ORDER BY date ASC, time ASC, id ASC
+      `).all(shiftId, shiftStartTimeStr);
+    } else {
+      treasuryDetails = db.prepare(`
+        SELECT type, description, amount, treasury_type, time, date, shift_id
+        FROM treasury
+        WHERE shift_id = ?
+        ORDER BY date ASC, time ASC, id ASC
+      `).all(shiftId);
     }
   } catch (err) {
     console.error('Error fetching treasuryDetails:', err);
   }
 
-  let netTreasuryCash = 0;
-  let netTreasuryVodafone = 0;
+  // حساب كروت ملخص الشيفت بناءً على حركات الخزينة الفعلية (الداخل والخارج)
+  // لضمان تطابق المعادلة المعروضة: المتوقع = العهدة + مبيعات نقدي - مرتجعات - مصروفات - سلف
   let totalSalesCash = 0;
   let totalSalesVodafone = 0;
-  let totalAdvances = 0;
+  let totalReturns = 0;   // مرتجعات نقدي
+  let totalExpenses = 0;  // مصروفات نقدي
+  let totalAdvances = 0;  // سلف ورواتب نقدي
+
+  let expectedVodafone = 0;
+  let totalReturnsVodafone = 0;
+  let totalExpensesVodafone = 0;
+  let totalAdvancesVodafone = 0;
+
+  let expectedInstapay = 0;
+  let totalSalesInstapay = 0;
 
   for (const t of treasuryDetails) {
+    const isRevenue = t.type === 'إيراد';
+    const desc = t.description || '';
+    const isReturn = desc.includes('مرتجع') || desc.includes('إرجاع');
+    const isAdvanceOrSalary = desc.includes('سلفة') || desc.includes('راتب');
+
     if (t.treasury_type === 'الخزينة') {
-      if (t.type === 'إيراد') {
-        netTreasuryCash += t.amount;
-        if (t.description.startsWith('فاتورة رقم') || t.description.startsWith('سداد مديونية فاتورة')) {
-          totalSalesCash += t.amount;
-        }
+      if (isRevenue) {
+        totalSalesCash += t.amount;
       } else {
-        netTreasuryCash -= t.amount;
-        if (t.description.startsWith('سلفة موظف')) {
+        if (isReturn) {
+          totalReturns += t.amount;
+        } else if (isAdvanceOrSalary) {
           totalAdvances += t.amount;
+        } else {
+          totalExpenses += t.amount;
         }
       }
     } else if (t.treasury_type === 'فودافون كاش') {
-      if (t.type === 'إيراد') {
-        netTreasuryVodafone += t.amount;
-        if (t.description.startsWith('فاتورة رقم') || t.description.startsWith('سداد مديونية فاتورة')) {
-          totalSalesVodafone += t.amount;
-        }
+      if (isRevenue) {
+        totalSalesVodafone += t.amount;
       } else {
-        netTreasuryVodafone -= t.amount;
-        if (t.description.startsWith('سلفة موظف')) {
-          totalAdvances += t.amount;
+        if (isReturn) {
+          totalReturnsVodafone += t.amount;
+        } else if (isAdvanceOrSalary) {
+          totalAdvancesVodafone += t.amount;
+        } else {
+          totalExpensesVodafone += t.amount;
         }
+      }
+    } else if (t.treasury_type === 'إنستا باي') {
+      if (isRevenue) {
+        totalSalesInstapay += t.amount;
       }
     }
   }
 
-  const totalReturns = returns.total || 0;
-  const totalExpenses = expenses.total || 0;
-  
-  // Real expected cash is purely Opening Cash + Net Treasury Movements for Cash
-  const expectedCash = (shift.opening_cash || 0) + netTreasuryCash;
-  const expectedVodafone = netTreasuryVodafone;
+  const expectedCash = (shift.opening_cash || 0) + totalSalesCash - totalReturns - totalExpenses - totalAdvances;
+  expectedVodafone = totalSalesVodafone - totalReturnsVodafone - totalExpensesVodafone - totalAdvancesVodafone;
+  expectedInstapay = totalSalesInstapay;
 
   return {
     success: true,
@@ -473,35 +633,40 @@ function getShiftSummary(shiftId) {
       shift,
       totalSalesCash,
       totalSalesVodafone,
-      totalSales: totalSalesCash + totalSalesVodafone,
+      totalSales: totalSalesCash + totalSalesVodafone + totalSalesInstapay,
       totalReturns,
       totalExpenses,
       totalAdvances,
       expectedCash,
       expectedVodafone,
+      expectedInstapay,
       invoiceCount: invCount.cnt || 0,
       treasuryDetails
     }
   };
 }
 
-function endShift(shiftId, actualCash, actualVodafone, notes) {
+function endShift(shiftId, actualCash, actualVodafone, actualInstapay, notes) {
   const summary = getShiftSummary(shiftId);
   if (!summary.success) return summary;
 
-  const { expectedCash, expectedVodafone, totalSalesCash, totalSalesVodafone, totalReturns, totalExpenses, invoiceCount } = summary.data;
+  const { expectedCash, expectedVodafone, expectedInstapay, totalSalesCash, totalSalesVodafone, totalSales, totalReturns, totalExpenses, invoiceCount } = summary.data;
 
   const cashDifference = (actualCash || 0) - expectedCash;
   const vodafoneDiff = (actualVodafone || 0) - expectedVodafone;
+  const instapayDiff = (actualInstapay || 0) - (expectedInstapay || 0);
+  const endTime = getLocalISOString();
 
   db.prepare(`
     UPDATE shifts SET
-      end_time = datetime('now'),
+      end_time = ?,
       expected_cash = ?,
       actual_cash_counted = ?,
       cash_difference = ?,
       vodafone_cash_expected = ?,
       vodafone_cash_actual = ?,
+      instapay_cash_expected = ?,
+      instapay_cash_actual = ?,
       total_sales = ?,
       total_returns = ?,
       total_expenses = ?,
@@ -511,19 +676,137 @@ function endShift(shiftId, actualCash, actualVodafone, notes) {
       closed_by_user_id = ?
     WHERE id = ?
   `).run(
+    endTime,
     expectedCash, actualCash, cashDifference,
     expectedVodafone, actualVodafone || 0,
-    totalSalesCash + totalSalesVodafone, totalReturns, totalExpenses,
+    expectedInstapay || 0, actualInstapay || 0,
+    totalSales, totalReturns, totalExpenses,
     invoiceCount, notes || null,
     currentSession.userId, shiftId
   );
 
   currentSession.shiftId = null;
-  return { success: true, data: { cashDifference, vodafoneDifference: vodafoneDiff } };
+  return { success: true, data: { cashDifference, vodafoneDifference: vodafoneDiff, instapayDifference: instapayDiff } };
+}
+
+// ─── Selective Reset ──────────────────────────────────────────────────────────
+// options: { keepCustomers, keepServices, keepEmployees, keepSettings }
+function selectiveReset(options = {}) {
+  try {
+    requireAdmin();
+    const { keepCustomers = false, keepServices = false, keepEmployees = false, keepSettings = false } = options;
+    const errors = [];
+
+    // ── تعطيل FK constraints أولاً لتجنب مشاكل الترابط بين الجداول ──────────
+    db.pragma('foreign_keys = OFF');
+
+    try {
+      const resetTx = db.transaction(() => {
+        const alwaysDelete = [
+          'audit_log', 'login_sessions',
+          'return_items', 'returns',
+          'invoice_items', 'invoices',
+          'attendance', 'leaves', 'advances', 'deductions',
+          'incentives', 'custody', 'salary_payments',
+          'expenses', 'revenues', 'treasury',
+          'purchase_items', 'purchases',
+          'shifts', 'partners', 'suppliers', 'backups'
+        ];
+
+        for (const tbl of alwaysDelete) {
+          try {
+            db.prepare(`DELETE FROM ${tbl}`).run();
+          } catch (e) {
+            errors.push(`فشل مسح جدول ${tbl}: ${e.message}`);
+          }
+        }
+
+        // إعادة تسلسل الفواتير
+        try {
+          db.prepare('DELETE FROM invoice_sequence').run();
+          db.prepare("INSERT OR REPLACE INTO invoice_sequence (id, last_number, year) VALUES (1, 0, strftime('%Y', 'now'))").run();
+        } catch (e) {
+          errors.push(`فشل إعادة تسلسل الفواتير: ${e.message}`);
+        }
+
+        // ─── مسح العملاء ──────────────────────────────────────────────────────
+        if (!keepCustomers) {
+          try { db.prepare('DELETE FROM customers').run(); }
+          catch (e) { errors.push(`فشل مسح العملاء: ${e.message}`); }
+        }
+
+        // ─── مسح الأصناف والخدمات ─────────────────────────────────────────────
+        if (!keepServices) {
+          try { db.prepare('DELETE FROM services').run(); }
+          catch (e) { errors.push(`فشل مسح الخدمات: ${e.message}`); }
+          try { db.prepare('DELETE FROM service_categories').run(); }
+          catch (e) { errors.push(`فشل مسح الفئات: ${e.message}`); }
+        }
+
+        // ─── مسح الموظفين والمستخدمين ─────────────────────────────────────────
+        if (!keepEmployees) {
+          const currentUserId = currentSession.userId;
+          try {
+            if (currentUserId) {
+              db.prepare('DELETE FROM users WHERE id != ?').run(currentUserId);
+            } else {
+              const adminUser = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1").get();
+              if (adminUser) {
+                db.prepare('DELETE FROM users WHERE id != ?').run(adminUser.id);
+              }
+            }
+          } catch (e) { errors.push(`فشل مسح المستخدمين: ${e.message}`); }
+
+          try {
+            const adminEmpId = currentSession.employeeId;
+            if (adminEmpId) {
+              db.prepare('DELETE FROM employees WHERE id != ?').run(adminEmpId);
+            } else {
+              db.prepare('DELETE FROM employees').run();
+            }
+          } catch (e) { errors.push(`فشل مسح الموظفين: ${e.message}`); }
+        }
+
+        // ─── إعادة الإعدادات ──────────────────────────────────────────────────
+        if (!keepSettings) {
+          try {
+            db.prepare(`UPDATE company_settings SET
+              company_name='EL-Tarzy', address='', phone='', logo_path=NULL,
+              tax_number='', receipt_footer='شكراً لزيارتكم', receipt_notes='',
+              show_tailor_name=1, show_customer_phone=1, currency='جنيه',
+              prevent_cashier_price_edit=0,
+              cashier_hide_reports=0, cashier_hide_hr=0, cashier_prevent_returns=0,
+              cashier_hide_finance=0, cashier_prevent_discount=0, cashier_prevent_settings=0,
+              wa_phone1='', wa_phone2='',
+              wa_tpl_invoice_confirm='', wa_tpl_order_ready='', wa_tpl_delivered='',
+              wa_tpl_full_payment='', wa_tpl_partial_payment=''
+              WHERE id=1`).run();
+          } catch (e) { errors.push(`فشل إعادة الإعدادات: ${e.message}`); }
+          try { db.prepare('DELETE FROM whatsapp_settings').run(); } catch (e) {}
+          try { db.prepare('DELETE FROM whatsapp_template_map').run(); } catch (e) {}
+        }
+      });
+
+      resetTx();
+    } finally {
+      // ── إعادة تفعيل FK constraints دائماً حتى لو حدث خطأ ─────────────────
+      db.pragma('foreign_keys = ON');
+    }
+
+    if (errors.length > 0) {
+      return { success: false, error: 'أخطاء أثناء المسح:\n' + errors.join('\n') };
+    }
+    return { success: true };
+
+  } catch (err) {
+    try { db.pragma('foreign_keys = ON'); } catch(e) {}
+    return { success: false, error: err.message };
+  }
 }
 
 // ─── Backup helpers ───────────────────────────────────────────────────────────
-function createBackup(backupType = 'يدوي', customDir = null) {
+async function createBackup(backupType = 'يدوي', customDir = null) {
+  const bType = typeof backupType === 'string' ? backupType : 'يدوي';
   const dbPath = getDbPath();
   if (!dbPath) return { success: false, error: 'لم يتم العثور على مسار قاعدة البيانات' };
 
@@ -545,18 +828,17 @@ function createBackup(backupType = 'يدوي', customDir = null) {
   const destPath = path.join(backupDir, fileName);
 
   try {
-    // Use better-sqlite3's backup API
-    db.backup(destPath)
-      .then(() => {
-        const stats = fs.statSync(destPath);
-        const sizeKb = (stats.size / 1024).toFixed(2);
+    // Use better-sqlite3's backup API synchronously / awaited
+    await db.backup(destPath);
+    const stats = fs.statSync(destPath);
+    const sizeKb = (stats.size / 1024).toFixed(2);
 
-        db.prepare(`
-          INSERT INTO backups (file_name, file_path, file_size_kb, backup_type)
-          VALUES (?, ?, ?, ?)
-        `).run(fileName, destPath, sizeKb, backupType);
-      })
-      .catch(err => console.error('Backup error:', err));
+    db.prepare(`
+      INSERT INTO backups (file_name, file_path, file_size_kb, backup_type)
+      VALUES (?, ?, ?, ?)
+    `).run(fileName, destPath, sizeKb, bType);
+
+    copyBackupToExternal(destPath);
 
     return { success: true, data: { fileName, filePath: destPath } };
   } catch (err) {
@@ -569,7 +851,9 @@ function createBackup(backupType = 'يدوي', customDir = null) {
       db.prepare(`
         INSERT INTO backups (file_name, file_path, file_size_kb, backup_type)
         VALUES (?, ?, ?, ?)
-      `).run(fileName, destPath, sizeKb, backupType);
+      `).run(fileName, destPath, sizeKb, bType);
+
+      copyBackupToExternal(destPath);
 
       return { success: true, data: { fileName, filePath: destPath } };
     } catch (copyErr) {
@@ -604,6 +888,127 @@ function listBackups() {
         ...r,
         exists: fs.existsSync(r.file_path)
       }))
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ─── Daily Report ───────────────────────────────────────────────────────────────
+function getDailyReport(date) {
+  try {
+    const dateLike = date + '%';
+
+    // ── 1. Invoices created today ───────────────────────────────────────────────
+    const invoices = db.prepare(`
+      SELECT i.*, c.name as customer_name, e.name as tailor_name,
+             COALESCE(i.amount_paid,0) as paid,
+             COALESCE(i.remaining,0) as remaining_amount
+      FROM invoices i 
+      LEFT JOIN customers c ON i.customer_id = c.id
+      LEFT JOIN employees e ON i.tailor_id = e.id
+      WHERE i.invoice_date LIKE ?
+    `).all(dateLike);
+
+    // ── 2. Today's treasury movements on OLD invoices (تسديد/استلام اليوم لفواتير قديمة) ──
+    // كل حركة خزينة اليوم نوعها "إيراد" ومرتبطة بفاتورة من تاريخ مختلف
+    const todayTreasury = db.prepare(`SELECT * FROM treasury WHERE date LIKE ? AND type='إيراد' ORDER BY time ASC`).all(dateLike);
+    
+    // رابط الوصف بالفاتورة: نبحث عن فواتير مذكورة في الـ treasury اليوم لكنها ليست من اليوم
+    const todayInvoiceNumbers = new Set(invoices.map(i => i.invoice_number));
+    const todayPaymentsOnOldInvoices = [];
+    
+    for (const tr of todayTreasury) {
+      // استخراج رقم الفاتورة من الوصف
+      if (!tr.description) continue;
+      const m = tr.description.match(/(?:فاتورة|invoice)\s*([\w-]+)/i);
+      if (!m) continue;
+      const invNum = m[1];
+      // لو الفاتورة مش من تقرير اليوم — يعني فاتورة قديمة
+      if (!todayInvoiceNumbers.has(invNum)) {
+        // نجيب بيانات الفاتورة نفسها
+        const oldInv = db.prepare(`
+          SELECT i.*, c.name as customer_name, c.phone as customer_phone
+          FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE i.invoice_number = ?
+        `).get(invNum);
+        todayPaymentsOnOldInvoices.push({
+          treasury_row: tr,
+          invoice: oldInv || null,
+          invoice_number: invNum
+        });
+      }
+    }
+
+    const expenses = db.prepare(`SELECT * FROM expenses WHERE date LIKE ?`).all(dateLike);
+
+    const advances = db.prepare(`
+      SELECT a.*, e.name as emp_name 
+      FROM advances a 
+      LEFT JOIN employees e ON a.employee_id = e.id 
+      WHERE a.date LIKE ?
+    `).all(dateLike);
+
+    const attendance = db.prepare(`
+      SELECT a.*, e.name as emp_name, e.salary_type 
+      FROM attendance a 
+      LEFT JOIN employees e ON a.employee_id = e.id 
+      WHERE a.date LIKE ?
+    `).all(dateLike);
+
+    const returns = db.prepare(`
+      SELECT r.*, i.invoice_number, c.name as customer_name
+      FROM returns r
+      LEFT JOIN invoices i ON r.original_invoice_id = i.id
+      LEFT JOIN customers c ON i.customer_id = c.id
+      WHERE r.return_date LIKE ?
+    `).all(dateLike);
+
+    const treasury = db.prepare(`SELECT * FROM treasury WHERE date LIKE ? ORDER BY time ASC`).all(dateLike);
+
+    const salaries = db.prepare(`
+      SELECT s.*, e.name as emp_name
+      FROM salary_payments s
+      LEFT JOIN employees e ON s.employee_id = e.id
+      WHERE s.paid_date LIKE ?
+    `).all(dateLike);
+
+    const revenues = (() => {
+      try { return db.prepare(`SELECT * FROM revenues WHERE date LIKE ?`).all(dateLike); }
+      catch(e) { return []; }
+    })();
+
+    // Summary totals
+    // دفعات اليوم على فواتير قديمة تُحتسب ضمن الإيرادات
+    const todayOldPaymentsTotal = todayPaymentsOnOldInvoices.reduce((s, p) => s + (p.treasury_row.amount || 0), 0);
+    const invoicesPaid   = invoices.reduce((s, i) => s + (i.paid || 0), 0);
+    const revenuesTotal  = revenues.reduce ? revenues.reduce((s, r) => s + (r.amount || 0), 0) : 0;
+    const expensesTotal  = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const returnsTotal   = returns.reduce((s, r) => s + (r.total_returned || 0), 0);
+    const advancesTotal  = advances.reduce((s, a) => s + (a.amount || 0), 0);
+    const salariesTotal  = salaries.reduce((s, s2) => s + (s2.net_salary || 0), 0);
+
+    const summary = {
+      invoices_paid: invoicesPaid + todayOldPaymentsTotal,
+      revenues: revenuesTotal,
+      expenses: expensesTotal,
+      returns: returnsTotal,
+      advances: advancesTotal,
+      salaries: salariesTotal
+    };
+
+    // Treasury daily net — بدون "البنك"
+    const allTypes = ['الخزينة', 'فودافون كاش', 'إنستا باي'];
+    const treasuryBalances = allTypes.map(t => {
+      const row = db.prepare(
+        `SELECT COALESCE(SUM(CASE WHEN type='إيراد' THEN amount ELSE -amount END),0) as net FROM treasury WHERE date LIKE ? AND treasury_type = ?`
+      ).get(dateLike, t);
+      return { treasury_type: t, balance: row ? row.net : 0 };
+    });
+
+    return {
+      success: true,
+      data: { summary, treasuryBalances, invoices, expenses, advances, attendance, returns, treasury, salaries, revenues, todayPaymentsOnOldInvoices }
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -659,9 +1064,9 @@ function setupIpcHandlers(ipcMain, app) {
     }
   });
 
-  ipcMain.handle('shift:end', (_, shiftId, actualCash, actualVodafone, notes) => {
+  ipcMain.handle('shift:end', (_, shiftId, actualCash, actualVodafone, actualInstapay, notes) => {
     try {
-      return endShift(shiftId, actualCash, actualVodafone, notes);
+      return endShift(shiftId, actualCash, actualVodafone, actualInstapay, notes);
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -793,7 +1198,7 @@ function setupIpcHandlers(ipcMain, app) {
           invoiceData.customer_id || null,
           invoiceData.employee_id || null,
           invoiceData.tailor_id || null,
-          invoiceData.invoice_date || new Date().toISOString().split('T')[0],
+          invoiceData.invoice_date || getBusinessDate(),
           invoiceData.payment_method || 'نقدي',
           invoiceData.invoice_type || null,
           invoiceData.treasury_type || 'الخزينة',
@@ -860,7 +1265,7 @@ function setupIpcHandlers(ipcMain, app) {
         const retInfo = retStmt.run(
           returnData.original_invoice_id,
           returnData.employee_id || currentSession.employeeId || null,
-          new Date().toISOString().split('T')[0],
+          getBusinessDate(),
           returnData.total_returned || 0,
           returnData.notes || null,
           currentSession.shiftId || null
@@ -1152,7 +1557,10 @@ function setupIpcHandlers(ipcMain, app) {
           cashier_hide_finance = ?, cashier_prevent_discount = ?, cashier_prevent_settings = ?,
           wa_phone1 = ?, wa_phone2 = ?,
           wa_tpl_invoice_confirm = ?, wa_tpl_order_ready = ?, wa_tpl_delivered = ?,
-          wa_tpl_full_payment = ?, wa_tpl_partial_payment = ?
+          wa_tpl_full_payment = ?, wa_tpl_partial_payment = ?,
+          admin_wa_phone = ?,
+          report_save_path = ?,
+          day_cutoff_hour = ?
         WHERE id = 1
       `).run(
         data.company_name, data.address, data.phone, data.logo_path || null,
@@ -1172,7 +1580,10 @@ function setupIpcHandlers(ipcMain, app) {
         data.wa_tpl_order_ready || '',
         data.wa_tpl_delivered || '',
         data.wa_tpl_full_payment || '',
-        data.wa_tpl_partial_payment || ''
+        data.wa_tpl_partial_payment || '',
+        data.admin_wa_phone || '',
+        data.report_save_path || '',
+        parseInt(data.day_cutoff_hour || 0, 10)
       );
       logAudit('update_settings', 'company_settings', 1, null, data);
       return { success: true };
@@ -1240,13 +1651,9 @@ function setupIpcHandlers(ipcMain, app) {
   });
 
   // ─── Backup ───────────────────────────────────────────────────────────────
-  ipcMain.handle('backup:create', (_, backupType) => {
+  ipcMain.handle('backup:create', async (_, backupType) => {
     try {
-      const result = createBackup(backupType || 'يدوي');
-      // Copy to external path if configured
-      if (result.success && result.data && result.data.filePath) {
-        setTimeout(() => copyBackupToExternal(result.data.filePath), 2000);
-      }
+      const result = await createBackup(backupType || 'يدوي');
       return result;
     } catch (err) {
       return { success: false, error: err.message };
@@ -1312,6 +1719,20 @@ function setupIpcHandlers(ipcMain, app) {
     }
   });
 
+  // ─── Selective Reset ──────────────────────────────────────────────────────
+  ipcMain.handle('db:selectiveReset', (_, options) => {
+    try {
+      return selectiveReset(options);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ─── Daily Report ─────────────────────────────────────────────────────────
+  ipcMain.handle('db:getDailyReport', (_, date) => {
+    return getDailyReport(date);
+  });
+
   // ─── DB backup (legacy — kept for backward compatibility) ─────────────────
   ipcMain.handle('db:backup', async (_, destPath) => {
     try {
@@ -1330,4 +1751,4 @@ function setupIpcHandlers(ipcMain, app) {
   });
 }
 
-module.exports = { getDb, setupIpcHandlers, generateInvoiceNumber, addTreasuryEntry, getTreasuryBalance, createBackup, copyBackupToExternal, getExternalBackupPath };
+module.exports = { getDb, setupIpcHandlers, generateInvoiceNumber, addTreasuryEntry, getTreasuryBalance, createBackup, copyBackupToExternal, getExternalBackupPath, selectiveReset };

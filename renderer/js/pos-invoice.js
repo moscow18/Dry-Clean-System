@@ -27,9 +27,15 @@ function renderPosHistory(invoices) {
   }
 }
 
+// debounce لتأخير البحث حتى لا يعلق الجهاز بكل ضغطة
+let _filterTimer = null;
 function filterPosHistory() {
-  const query = (document.getElementById('posHistorySearch').value || '').toLowerCase();
-  const phone = (document.getElementById('posHistoryPhone').value || '').toLowerCase();
+  clearTimeout(_filterTimer);
+  _filterTimer = setTimeout(_doFilter, 300);
+}
+function _doFilter() {
+  const query    = (document.getElementById('posHistorySearch').value || '').toLowerCase();
+  const phone    = (document.getElementById('posHistoryPhone').value || '').toLowerCase();
   const tailorId = document.getElementById('posHistoryTailor')?.value || '';
 
   if (!query && !phone && !tailorId) {
@@ -38,15 +44,14 @@ function filterPosHistory() {
   }
 
   const filtered = posAllInvoices.filter(inv => {
-    const invNum = (inv.invoice_number || '').toLowerCase();
-    const custName = (inv.customer_name || '').toLowerCase();
-    const custPhone = (inv.customer_phone || '').toLowerCase();
-    const rowTailor = (inv.tailor_id || '').toString();
-    const dynamicNetTotal = (inv.dynamic_net_total || 0).toString();
+    const invNum           = (inv.invoice_number || '').toLowerCase();
+    const custName         = (inv.customer_name  || '').toLowerCase();
+    const custPhone        = (inv.customer_phone || '').toLowerCase();
+    const rowTailor        = (inv.tailor_id      || '').toString();
+    const dynamicNetTotal  = (inv.dynamic_net_total || 0).toString();
 
-    // Search includes invoice number, customer name, AND total amount
-    const matchQuery = !query || invNum.includes(query) || custName.includes(query) || dynamicNetTotal.includes(query);
-    const matchPhone = !phone || custPhone.includes(phone);
+    const matchQuery  = !query    || invNum.includes(query) || custName.includes(query) || dynamicNetTotal.includes(query);
+    const matchPhone  = !phone    || custPhone.includes(phone);
     const matchTailor = !tailorId || rowTailor === tailorId;
     return matchQuery && matchPhone && matchTailor;
   });
@@ -69,7 +74,7 @@ function suspendInvoice() {
   
   const invData = {
     id: Date.now(),
-    date: new Date().toLocaleTimeString('ar-EG'),
+    date: new Date().toLocaleTimeString('ar-EG-u-nu-latn'),
     customerInput,
     customerId,
     invoiceNumber: currentInvoiceNumber, // Fix 1: save original number
@@ -184,21 +189,35 @@ let lastSavedInvoice = null;
 let sessionRole = null;
 let settings = { company_name: 'EL-Tarzy', currency: 'جنيه', receipt_footer: 'شكراً لزيارتكم' };
 
-
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────────────
 async function init() {
   sessionRole = sessionStorage.getItem('elTarzy_role');
   
   // Date default
-  document.getElementById('invoiceDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('invoiceDate').value = getLocalISODate();
+
+  // جلب جميع البيانات بشكل متوازٍ (Promise.all) لتسريع التحميل
+  const [
+    invRes,
+    setRes,
+    catRes,
+    srvRes,
+    custRes,
+    empRes,
+  ] = await Promise.all([
+    window.db.generateInvoiceNumber(),
+    window.db.getSettings(),
+    window.db.query('SELECT * FROM service_categories ORDER BY id', []),
+    window.db.query('SELECT s.*, sc.name as cat_name FROM services s LEFT JOIN service_categories sc ON s.category_id=sc.id ORDER BY s.name', []),
+    window.db.query('SELECT id,name,phone FROM customers ORDER BY name', []),
+    window.db.query('SELECT id,name FROM employees WHERE is_active=1 ORDER BY name', []),
+  ]);
 
   // Invoice number
-  const invRes = await window.db.generateInvoiceNumber();
-  if(invRes.success){ currentInvoiceNumber = invRes.data; document.getElementById('invoiceNumberDisplay').textContent = invRes.data; }
+  if (invRes.success) { currentInvoiceNumber = invRes.data; document.getElementById('invoiceNumberDisplay').textContent = invRes.data; }
 
   // Settings
-  const setRes = await window.db.getSettings();
-  if(setRes.success && setRes.data) {
+  if (setRes.success && setRes.data) {
     settings = {...settings, ...setRes.data};
     if (settings.logo_path) {
       const safeLogo = 'file:///' + settings.logo_path.replace(/\\/g, '/');
@@ -207,7 +226,6 @@ async function init() {
     if (settings.company_name) {
       document.querySelector('#posLogoContainer .logo-text').textContent = settings.company_name;
     }
-
     if (sessionRole === 'cashier') {
       if (Number(settings.prevent_cashier_price_edit) === 1) {
         document.getElementById('itemPrice').disabled = true;
@@ -220,51 +238,50 @@ async function init() {
     }
   }
 
-  // Load categories
-  const catRes = await window.db.query('SELECT * FROM service_categories ORDER BY id',[]);
-  if(catRes.success){ categories = catRes.data; renderCategoryBtns(); populateCategorySelect(); }
-  
+  // Categories
+  if (catRes.success) { categories = catRes.data; renderCategoryBtns(); populateCategorySelect(); }
+
   // Make categories scrollable with mouse wheel
   const catListElem = document.getElementById('categoryBtns');
   if (catListElem) {
     catListElem.addEventListener('wheel', (e) => {
-      if (e.deltaY !== 0) {
-        e.preventDefault();
-        catListElem.scrollLeft += e.deltaY;
-      }
+      if (e.deltaY !== 0) { e.preventDefault(); catListElem.scrollLeft += e.deltaY; }
     });
   }
 
-  // Load all services
-  const srvRes = await window.db.query('SELECT s.*,sc.name as cat_name FROM services s LEFT JOIN service_categories sc ON s.category_id=sc.id ORDER BY s.name',[]);
-  if(srvRes.success){ 
-    allServices = srvRes.data; 
-    populateServiceSelect(allServices); 
+  // Services
+  if (srvRes.success) {
+    allServices = srvRes.data;
+    populateServiceSelect(allServices);
     renderServiceGrid(allServices);
   }
 
-  // Load customers
-  const custRes = await window.db.query('SELECT id,name,phone FROM customers ORDER BY name',[]);
+  // Customers
   const cList = document.getElementById('customersList');
-  if(custRes.success) {
+  if (custRes.success) {
     window.allCustomers = custRes.data;
-    cList.innerHTML = '';
-    custRes.data.forEach(c => { 
-      cList.innerHTML += `<option value="${c.name} - ${c.phone||''}" data-id="${c.id}" data-phone="${c.phone||''}"></option>`; 
+    let custHtml = '';
+    custRes.data.forEach(c => {
+      custHtml += `<option value="${c.name} - ${c.phone||""}" data-id="${c.id}" data-phone="${c.phone||""}"></option>`;
     });
+    cList.innerHTML = custHtml;
   }
 
-  // Load employees
-  const empRes = await window.db.query('SELECT id,name FROM employees WHERE is_active=1 ORDER BY name',[]);
-  const empSel = document.getElementById('employeeSelect');
+  // Employees
+  const empSel  = document.getElementById('employeeSelect');
   const tailorSel = document.getElementById('tailorSelect');
-  empSel.innerHTML = '<option value="">اختر الكاشير</option>';
-  tailorSel.innerHTML = '<option value="">بدون خياط</option>';
-  if(empRes.success) {
-    empRes.data.forEach(e=>{ 
-      empSel.innerHTML+=`<option value="${e.id}">${e.name}</option>`; 
-      tailorSel.innerHTML+=`<option value="${e.id}">${e.name}</option>`; 
+  if (empRes.success) {
+    let empHtml = '<option value="">اختر الكاشير</option>';
+    let tailorHtml = '<option value="">بدون خياط</option>';
+    empRes.data.forEach(e => {
+      empHtml += `<option value="${e.id}">${e.name}</option>`;
+      tailorHtml += `<option value="${e.id}">${e.name}</option>`;
     });
+    empSel.innerHTML = empHtml;
+    tailorSel.innerHTML = tailorHtml;
+  } else {
+    empSel.innerHTML = '<option value="">اختر الكاشير</option>';
+    tailorSel.innerHTML = '<option value="">بدون خياط</option>';
   }
 
   // Auto-select current employee as cashier
@@ -636,7 +653,7 @@ async function sendWhatsApp() {
   let tailorName = tailorSelect.options[tailorSelect.selectedIndex]?.text;
   if (!tailorName || tailorName === 'بدون خياط' || tailorName === 'اختر الخياط...') tailorName = 'غير محدد';
   const now = new Date();
-  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute:'2-digit' });
+  const timeStr = now.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute:'2-digit' });
 
   const res = await window.whatsapp.sendInvoiceConfirm({
     phone,
@@ -705,7 +722,7 @@ function buildReceiptHTML(inv) {
   `).join('');
 
   const invNum = inv.invoiceNumber || inv.invoice_number || currentInvoiceNumber;
-  const date = inv.invoice_date || new Date().toLocaleDateString('ar-EG');
+  const date = inv.invoice_date || new Date().toLocaleDateString('ar-EG-u-nu-latn');
   const subtotal = fmt(inv.subtotal||0);
   const discount = fmt(inv.discount_amount||0);
   const net = fmt(inv.net_total||0);
@@ -715,8 +732,8 @@ function buildReceiptHTML(inv) {
 
   const safeLogo = settings.logo_path ? 'file:///' + settings.logo_path.replace(/\\/g, '/') : '';
   const logoHTML = safeLogo ? `<div style="text-align:center;margin-bottom:4px;"><img src="${safeLogo}" style="width:100%;max-height:130px;object-fit:contain;"></div>` : '';
-  const addressHTML = settings.address ? `<div style="text-align:center;font-size:10px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
-  const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:10px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
+  const addressHTML = settings.address ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
+  const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
   
   const tailorSelect = document.getElementById('tailorSelect');
   const custSelect = document.getElementById('customerSelect');
@@ -750,15 +767,15 @@ function buildReceiptHTML(inv) {
   const custPhoneHTML = (custPhone && custPhone !== 'null' && custPhone !== '') ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">ت.العميل:</span><span style="font-weight:700;">${custPhone}</span></div>` : '';
   
   const notesStr = inv.notes || document.getElementById('invoiceNotes').value || '';
-  const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:10px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
-  const settingsNotesHTML = settings.receipt_notes ? `<div style="text-align:center;font-size:10px;margin-top:4px;font-weight:700;">${settings.receipt_notes}</div>` : '';
+  const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:12px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
+  const settingsNotesHTML = settings.receipt_notes ? `<div style="text-align:center;font-size:12px;margin-top:4px;font-weight:700;">${settings.receipt_notes}</div>` : '';
 
   const receiptContent = `
     <div class="receipt" style="
       width:68mm;
       box-sizing:border-box;
       font-family:'Cairo',Arial,sans-serif;
-      font-size:11px;
+      font-size:13px;
       font-weight:700;
       color:#000;
       direction:rtl;
@@ -769,7 +786,7 @@ function buildReceiptHTML(inv) {
     ">
       ${logoHTML}
       <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'EL-Tarzy'}</div>
-      <div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
+      <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
       ${addressHTML}
       ${phoneHTML}
       <div style="border-top:2px dashed #000;margin:6px 0;"></div>
@@ -779,7 +796,7 @@ function buildReceiptHTML(inv) {
       ${custPhoneHTML}
       ${tailorHTML}
       <div style="border-top:2px dashed #000;margin:6px 0;"></div>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;font-weight:700;table-layout:fixed;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;font-weight:700;table-layout:fixed;">
         <colgroup>
           <col style="width:8%;">
           <col style="width:40%;">
@@ -801,13 +818,13 @@ function buildReceiptHTML(inv) {
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الإجمالي:</span><span style="font-weight:700;">${subtotal} ${settings.currency||'جنيه'}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخصم:</span><span style="font-weight:700;">${discount} ${settings.currency||'جنيه'}</span></div>
       <div style="border-top:1px solid #000;margin:4px 0;"></div>
-      <div style="display:flex;justify-content:space-between;font-weight:900;font-size:13px;margin-bottom:3px;"><span>الصافي:</span><span>${net} ${settings.currency||'جنيه'}</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:900;font-size:16px;margin-bottom:3px;"><span>الصافي:</span><span>${net} ${settings.currency||'جنيه'}</span></div>
       <div style="border-top:1px solid #000;margin:4px 0;"></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">المدفوع:</span><span style="font-weight:700;">${paid} ${settings.currency||'جنيه'}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الباقي:</span><span style="font-weight:900;">${remaining} ${settings.currency||'جنيه'}</span></div>
       ${invoiceNotesHTML}
       <div style="border-top:2px dashed #000;margin:8px 0;"></div>
-      <div style="text-align:center;font-weight:900;font-size:11px;">${settings.receipt_footer||'شكراً لزيارتكم'}</div>
+      <div style="text-align:center;font-weight:900;font-size:13px;">${settings.receipt_footer||'شكراً لزيارتكم'}</div>
       ${settingsNotesHTML}
     </div>`;
 
@@ -910,7 +927,7 @@ async function newInvoice() {
   document.getElementById('invoiceNotes').value='';
   document.getElementById('customerSearchInput').value='';
   document.getElementById('customerSelect').value='';
-  document.getElementById('invoiceDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('invoiceDate').value=getLocalISODate();
   window._resumedInvoiceNumber = null; // Fix 1: clear any resumed invoice number
   window._resumedPaymentMethod = null;
   closeModal('savedModal');
@@ -1014,13 +1031,15 @@ async function openHistoryModal() {
   if (tailorSel && tailorSel.options.length <= 1) {
     const tRes = await window.db.query('SELECT id, name FROM employees WHERE is_active=1 ORDER BY name', []);
     if (tRes.success) {
+      let tHtml = tailorSel.innerHTML; // keep existing options (like the default one)
       tRes.data.forEach(e => {
-        tailorSel.innerHTML += `<option value="${e.id}">${e.name}</option>`;
+        tHtml += `<option value="${e.id}">${e.name}</option>`;
       });
+      tailorSel.innerHTML = tHtml;
     }
   }
 
-  // Fetch ALL invoices (no LIMIT)
+  // جلب آخر 300 فاتورة فقط — لتجنب بطء الجلب عند كثرة الفواتير
   const res = await window.db.query(`
     SELECT i.*, 
            c.name as customer_name, 
@@ -1031,6 +1050,7 @@ async function openHistoryModal() {
     LEFT JOIN customers c ON i.customer_id = c.id
     LEFT JOIN employees t ON i.tailor_id = t.id
     ORDER BY i.id DESC
+    LIMIT 300
   `, []);
   if (res.success && res.data) {
     posAllInvoices = res.data;
@@ -1066,16 +1086,16 @@ init();
 window.electron.onConfirmBackupBeforeQuit(() => {
   Swal.fire({
     title: 'إغلاق البرنامج',
-    text: 'هل تريد إنشاء نسخة احتياطية قبل الخروج؟',
-    icon: 'question',
-    showDenyButton: true,
-    showCancelButton: true,
-    confirmButtonText: 'نسخ وخروج',
-    denyButtonText: 'خروج بدون نسخة',
-    cancelButtonText: 'إلغاء'
-  }).then((result) => {
-    if (result.isConfirmed) window.electron.quitWithBackup();
-    else if (result.isDenied) window.electron.quitWithoutBackup();
-    else window.electron.cancelQuit();
+    html: `
+      <p style="font-size:14px;font-weight:600;margin-bottom:8px;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
+        <button class="btn btn-primary" onclick="Swal.close(); sendDailyReportAndQuit();">إرسال التقرير وإنهاء</button>
+        <button class="btn btn-success" onclick="Swal.close(); window.electron.quitWithBackup();">نسخ وخروج</button>
+        <button class="btn btn-danger" onclick="Swal.close(); window.electron.quitWithoutBackup();">خروج بدون نسخة</button>
+        <button class="btn btn-outline" onclick="Swal.close(); window.electron.cancelQuit();">إلغاء</button>
+      </div>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false
   });
 });

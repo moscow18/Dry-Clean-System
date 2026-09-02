@@ -1,8 +1,8 @@
 // ─── Clock ────────────────────────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
-  document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('ar-EG');
-  document.getElementById('dateDisplay').textContent = now.toLocaleDateString('ar-EG', {
+  document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('ar-EG-u-nu-latn');
+  document.getElementById('dateDisplay').textContent = now.toLocaleDateString('ar-EG-u-nu-latn', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 }
@@ -13,21 +13,21 @@ updateClock();
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 async function loadStats() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalISODate();
 
   const salesRes = await window.db.queryOne(
     `SELECT COALESCE(SUM(net_total),0) as total, COUNT(*) as cnt FROM invoices WHERE invoice_date=? AND is_returned=0`,
     [today]
   );
   if (salesRes.success) {
-    document.getElementById('todaySales').textContent = Number(salesRes.data.total).toLocaleString('ar-EG');
+    document.getElementById('todaySales').textContent = Number(salesRes.data.total).toLocaleString('en-US');
   }
 
   const expRes = await window.db.queryOne(
     `SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE date=?`, [today]
   );
   if (expRes.success) {
-    document.getElementById('todayExpenses').textContent = Number(expRes.data.total).toLocaleString('ar-EG');
+    document.getElementById('todayExpenses').textContent = Number(expRes.data.total).toLocaleString('en-US');
   }
 
   // Daily Net Cash (الخزينة)
@@ -36,7 +36,7 @@ async function loadStats() {
     [today]
   );
   if (netCashRes.success) {
-    document.getElementById('dailyNetCash').textContent = Number(netCashRes.data.net).toLocaleString('ar-EG');
+    document.getElementById('dailyNetCash').textContent = Number(netCashRes.data.net).toLocaleString('en-US');
   }
 
   // Daily Net Vodafone Cash (فودافون كاش)
@@ -45,7 +45,16 @@ async function loadStats() {
     [today]
   );
   if (netVCRes.success) {
-    document.getElementById('dailyNetVodafone').textContent = Number(netVCRes.data.net).toLocaleString('ar-EG');
+    document.getElementById('dailyNetVodafone').textContent = Number(netVCRes.data.net).toLocaleString('en-US');
+  }
+
+  // Daily Net InstaPay (إنستا باي)
+  const netIPRes = await window.db.queryOne(
+    `SELECT COALESCE(SUM(CASE WHEN type='إيراد' THEN amount ELSE -amount END),0) as net FROM treasury WHERE date=? AND treasury_type='إنستا باي'`,
+    [today]
+  );
+  if (netIPRes.success) {
+    document.getElementById('dailyNetInstapay').textContent = Number(netIPRes.data.net).toLocaleString('en-US');
   }
 
   // Today Advances
@@ -54,18 +63,35 @@ async function loadStats() {
     [today]
   );
   if (advRes.success) {
-    document.getElementById('todayAdvances').textContent = Number(advRes.data.total).toLocaleString('ar-EG');
+    document.getElementById('todayAdvances').textContent = Number(advRes.data.total).toLocaleString('en-US');
   }
 
   const balRes = await window.db.getTreasuryBalance('الخزينة');
   if (balRes.success) {
-    document.getElementById('treasuryBalance').textContent = Number(balRes.data).toLocaleString('ar-EG');
+    document.getElementById('treasuryBalance').textContent = Number(balRes.data).toLocaleString('en-US');
   }
 }
 
 // ─── WhatsApp ─────────────────────────────────────────────────────────────────
-function openWhatsApp() {
-  window.electron.openExternal('https://wa.me/');
+async function openWhatsApp() {
+  const result = await Swal.fire({
+    title: 'الدعم الفني',
+    text: 'اختر رقم الدعم الفني للتواصل معنا عبر واتساب (Dev Blue Tech):',
+    icon: 'info',
+    showCancelButton: true,
+    showDenyButton: true,
+    confirmButtonText: 'تواصل مع 01129021377',
+    denyButtonText: 'تواصل مع 01204165586',
+    cancelButtonText: 'إلغاء',
+    confirmButtonColor: '#25d366',
+    denyButtonColor: '#128c7e'
+  });
+
+  if (result.isConfirmed) {
+    window.electron.openExternal('https://wa.me/201129021377');
+  } else if (result.isDenied) {
+    window.electron.openExternal('https://wa.me/201204165586');
+  }
 }
 
 // ─── Current User & Role-Based Visibility ─────────────────────────────────────
@@ -201,14 +227,31 @@ async function handleLogout() {
 }
 
 // ─── Attendance Modal Logic ───────────────────────────────────────────────────
-async function handleAttendance() {
+async function handleAttendance(type) { // type = 'in' or 'out'
   document.getElementById('attendanceModal').classList.add('open');
   
   // Set default date and time
   const now = new Date();
   document.getElementById('attDate').value = now.toISOString().split('T')[0];
   document.getElementById('attTimeIn').value = now.toTimeString().substring(0, 5);
-  document.getElementById('attTimeOut').value = '';
+  document.getElementById('attTimeOut').value = now.toTimeString().substring(0, 5);
+
+  // Toggle fields based on type
+  if (type === 'in') {
+    document.getElementById('attModalTitle').innerHTML = '🟢 تسجيل حضور';
+    document.getElementById('attTimeInGroup').style.display = 'block';
+    document.getElementById('attTimeOutGroup').style.display = 'none';
+    document.getElementById('btnSubmitAttIn').style.display = 'block';
+    document.getElementById('btnSubmitAttOut').style.display = 'none';
+    document.getElementById('btnSubmitAttOutAll').style.display = 'none';
+  } else {
+    document.getElementById('attModalTitle').innerHTML = '🔴 تسجيل انصراف';
+    document.getElementById('attTimeInGroup').style.display = 'none';
+    document.getElementById('attTimeOutGroup').style.display = 'block';
+    document.getElementById('btnSubmitAttIn').style.display = 'none';
+    document.getElementById('btnSubmitAttOut').style.display = 'block';
+    document.getElementById('btnSubmitAttOutAll').style.display = 'block';
+  }
 
   // Load active employees
   const sel = document.getElementById('attEmpSelect');
@@ -289,6 +332,78 @@ async function saveDashboardCheckout() {
   showToast('تم تسجيل الانصراف بنجاح', 'success');
   closeModal('attendanceModal');
 }
+
+async function saveDashboardCheckoutAll() {
+  if (!confirm('هل تريد فعلاً تسجيل انصراف لكل من سجل حضور اليوم ولم ينصرف بعد؟ (سيتم احتساب وقت الانصراف ليتطابق مع ساعات عملهم الرسمية بدون تأخير أو زيادة)')) return;
+
+  const date = document.getElementById('attDate').value;
+  if (!date) {
+    showToast('يجب تحديد التاريخ أولاً', 'error');
+    return;
+  }
+
+  // Get all active attendances without checkout for this date
+  const attListRes = await window.db.query(
+    `SELECT a.*, e.work_hours_per_day FROM attendance a JOIN employees e ON a.employee_id = e.id WHERE a.date=? AND a.check_out IS NULL`,
+    [date]
+  );
+
+  if (!attListRes.success || !attListRes.data || attListRes.data.length === 0) {
+    showToast('لا يوجد موظفين حاضرين بدون انصراف لهذا اليوم', 'info');
+    return;
+  }
+
+  let count = 0;
+  for (const att of attListRes.data) {
+    const checkInTime = new Date(att.check_in);
+    const workHours = att.work_hours_per_day || 8;
+    
+    // Add workHours to check_in time to get ideal check_out time
+    const idealCheckOut = new Date(checkInTime.getTime() + workHours * 60 * 60 * 1000);
+    
+    // Format to local ISO string keeping local timezone (since the DB expects local time)
+    // We can just construct it manually or use simple string slicing if we offset by timezone
+    const offsetMs = idealCheckOut.getTimezoneOffset() * 60000;
+    const localIso = new Date(idealCheckOut.getTime() - offsetMs).toISOString().slice(0,19);
+
+    await window.db.run(
+      `UPDATE attendance SET check_out=?, late_minutes=0, extra_minutes=0 WHERE id=?`,
+      [localIso, att.id]
+    );
+    count++;
+  }
+
+  showToast(`تم تسجيل الانصراف لعدد ${count} موظفين بنجاح ✅`, 'success');
+  closeModal('attendanceModal');
+}
+
+// ─── Auto-Checkout Missing Previous Days ──────────────────────────────────────
+async function autoCheckoutMissing() {
+  const today = getLocalISODate();
+  // Select attendance older than today without checkout
+  const res = await window.db.query(
+    `SELECT a.*, e.work_hours_per_day FROM attendance a JOIN employees e ON a.employee_id = e.id WHERE a.date < ? AND a.check_out IS NULL`,
+    [today]
+  );
+  if (res.success && res.data && res.data.length > 0) {
+    for (const att of res.data) {
+      const checkInTime = new Date(att.check_in);
+      const workHours = att.work_hours_per_day || 8;
+      const idealCheckOut = new Date(checkInTime.getTime() + workHours * 60 * 60 * 1000);
+      const offsetMs = idealCheckOut.getTimezoneOffset() * 60000;
+      const localIso = new Date(idealCheckOut.getTime() - offsetMs).toISOString().slice(0,19);
+      await window.db.run(
+        `UPDATE attendance SET check_out=?, late_minutes=0, extra_minutes=0 WHERE id=?`,
+        [localIso, att.id]
+      );
+    }
+    console.log(`[Auto-Checkout] Fixed ${res.data.length} missing checkouts from previous days.`);
+  }
+}
+// Run auto checkout silently when dashboard loads
+setTimeout(autoCheckoutMissing, 2000);
+
+
 
 // ─── End Shift — Navigate to end-shift screen (cashier only) ────────────────────
 function endShift() {
@@ -410,7 +525,7 @@ async function loadPartners() {
       <td>${p.name}</td>
       <td>${p.share_percent}%</td>
       <td>${p.phone || '—'}</td>
-      <td>${Number(p.opening_balance).toLocaleString('ar-EG')} جنيه</td>
+      <td>${Number(p.opening_balance).toLocaleString('en-US')} جنيه</td>
       <td><button class="btn btn-sm btn-danger" onclick="deletePartner(${p.id})">حذف</button></td>
     </tr>
   `).join('');
@@ -442,7 +557,7 @@ async function deletePartner(id) {
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
   if (e.key === 'F1') { e.preventDefault(); navigate('pos-invoice.html'); }
-  if (e.key === 'F2') { e.preventDefault(); navigate('reports.html'); }
+  if (e.key === 'F2') { e.preventDefault(); navigate('daily-report.html'); }
   if (e.key === 'F3') { e.preventDefault(); navigate('finance.html'); }
   if (e.key === 'F4') { e.preventDefault(); showAdvanceModal(); }
 });
@@ -466,12 +581,29 @@ async function checkTrialStatus() {
         bannerText.style.color = '#FCA5A5';
       }
     } else if (status.trialExpired && !status.activated) {
-      // انتهت التجربة — إغلاق كامل للنظام
+      // انتهت التجربة أو التفعيل المؤقت — إغلاق كامل للنظام
       banner.style.display = 'flex';
-      bannerText.textContent = '🔒 انتهت فترة التجربة المجانية. الرجاء تفعيل النظام للاستمرار.';
+      bannerText.textContent = '🔒 انتهت فترة الصلاحية. الرجاء تفعيل النظام للاستمرار.';
       banner.style.background = 'linear-gradient(135deg,#4a1d1d,#5c1a1a)';
       bannerText.style.color = '#FCA5A5';
       showFullLockOverlay();
+    } else if (status.activated && status.isTimed) {
+      // تفعيل مؤقت نشط — اعرض الأيام المتبقية كمعلومة
+      banner.style.display = 'flex';
+      const days = status.daysLeft;
+      bannerText.textContent = days === 1
+        ? '⚠️ باقي يوم واحد فقط على انتهاء اشتراكك!'
+        : `⏳ اشتراكك الحالي ساري ومتبقي ${days} ${days <= 10 ? 'أيام' : 'يوم'} على انتهائه.`;
+      
+      // تغيير لون البانر ليكون مختلف (مثلاً أزرق/ذهبي)
+      if (days <= 5) {
+        banner.style.background = 'linear-gradient(135deg,#7f1d1d,#991b1b)'; // تحذير إذا اقترب الانتهاء
+        bannerText.style.color = '#FCA5A5';
+      } else {
+        banner.style.background = 'linear-gradient(135deg,#1B2A4A,#2d4373)';
+        banner.style.borderColor = '#C9A84C';
+        bannerText.style.color = '#F8FAFC';
+      }
     }
   } catch (e) { /* ignore if activation API not available */ }
 }

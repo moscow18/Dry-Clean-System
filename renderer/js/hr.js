@@ -20,28 +20,32 @@ function showSection(name){
   });
   document.getElementById('sectionTitle').textContent = sectionTitles[name]||name;
   
-  if (!window.hrCache[name]) {
-    if(name==='employees') loadEmployees();
-    if(name==='attendance'){
-      populateEmpSelect('att_emp');
-      populateEmpSelect('co_emp');
-      loadAttendance();
-      const today = new Date().toISOString().split('T')[0];
-      document.getElementById('att_date').value = today;
-      document.getElementById('co_date').value  = today;
-    }
-    if(name==='leaves'){ populateEmpSelect('lv_emp'); loadLeaves(); document.getElementById('lv_date').value=new Date().toISOString().split('T')[0]; }
-    if(name==='advances'){ populateEmpSelect('adv_emp'); loadAdvances(); }
-    if(name==='deductions'){ populateEmpSelect('ded_emp'); loadDeductions(); }
-    if(name==='incentives'){ populateEmpSelect('inc_emp'); loadIncentives(); }
-    if(name==='custody'){ populateEmpSelect('cus_emp'); loadCustody(); }
-    if(name==='salary'){ loadSalaryMonths(); loadSalaryReport(); }
-    if(name==='emp-sales'){ populateEmpSelect('empSalesEmp',true);
-      const d=new Date(); document.getElementById('empSalesFrom').value=d.getFullYear()+'-01-01';
-      document.getElementById('empSalesTo').value=d.toISOString().split('T')[0]; loadEmpSales(); }
-    window.hrCache[name] = true;
+  // Always reload data on section switch (no caching — prevents stale/empty data)
+  if(name==='employees') loadEmployees();
+  if(name==='attendance'){
+    populateEmpSelect('att_emp');
+    populateEmpSelect('co_emp');
+    populateEmpSelect('attFilterEmp', true);
+    loadAttendance();
+    const today = getLocalISODate();
+    document.getElementById('att_date').value = today;
+    document.getElementById('co_date').value  = today;
   }
+  if(name==='leaves'){ populateEmpSelect('lv_emp'); loadLeaves(); document.getElementById('lv_date').value=getLocalISODate(); }
+  if(name==='advances'){ 
+    populateEmpSelect('adv_emp'); 
+    populateEmpSelect('advFilterEmp', true);
+    loadAdvances(); 
+  }
+  if(name==='deductions'){ populateEmpSelect('ded_emp'); loadDeductions(); }
+  if(name==='incentives'){ populateEmpSelect('inc_emp'); loadIncentives(); }
+  if(name==='custody'){ populateEmpSelect('cus_emp'); loadCustody(); }
+  if(name==='salary'){ loadSalaryMonths(); loadSalaryReport(); }
+  if(name==='emp-sales'){ populateEmpSelect('empSalesEmp',true);
+    const d=new Date(); document.getElementById('empSalesFrom').value=d.getFullYear()+'-01-01';
+    document.getElementById('empSalesTo').value=d.toISOString().split('T')[0]; loadEmpSales(); }
 }
+
 
 function onGlobalSearch(){
   const term = document.getElementById('globalSearch').value.toLowerCase();
@@ -182,19 +186,34 @@ async function openEmpDetails(id) {
   const commRes   = await window.db.queryOne(`SELECT COALESCE(SUM(net_total),0) as total_sales FROM invoices WHERE tailor_id=? AND strftime('%Y-%m',invoice_date)=?`, [id, month]);
   const retRes    = await window.db.queryOne(`SELECT COALESCE(SUM(r.total_returned),0) as total_returned FROM returns r JOIN invoices i ON r.original_invoice_id=i.id WHERE i.tailor_id=? AND strftime('%Y-%m',i.invoice_date)=?`, [id, month]);
   const lvRes     = await window.db.queryOne(`SELECT COUNT(*) as count FROM leaves WHERE employee_id=? AND strftime('%Y-%m',leave_date)=?`, [id, month]);
-  const attRes    = await window.db.queryOne(`SELECT COUNT(*) as days, SUM(late_minutes) as late FROM attendance WHERE employee_id=? AND strftime('%Y-%m',date)=?`, [id, month]);
+  const attRes    = await window.db.queryOne(`SELECT COUNT(DISTINCT date) as days, SUM(late_minutes) as late FROM attendance WHERE employee_id=? AND strftime('%Y-%m',date)=?`, [id, month]);
 
-  const gross          = emp.monthly_salary || 0;
+  const salaryType = emp.salary_type || 'ثابت';
+  let gross = 0;
+  
+  if (salaryType === 'يومية') {
+    const daysWorked = attRes.data?.days || 0;
+    const dailyRate = emp.monthly_salary || 0;
+    gross = daysWorked * dailyRate;
+  } else {
+    gross = emp.monthly_salary || 0;
+  }
+
   const commPct        = emp.commission_percent || 0;
   const netSales       = Math.max(0, (commRes.data?.total_sales || 0) - (retRes.data?.total_returned || 0));
   const commission     = netSales * (commPct / 100);
   const allowance      = emp.monthly_leave_days != null ? emp.monthly_leave_days : 2;
-  const dayValue       = gross / 30;
+  const dayValue       = (emp.monthly_salary || 0) / 30; // base value on nominal salary for deductions
   const takenLeaves    = lvRes.data?.count || 0;
   const remainingLeaves= Math.max(0, allowance - takenLeaves);
   const excessLeaves   = Math.max(0, takenLeaves - allowance);
-  const leaveBonus     = remainingLeaves * dayValue;
-  const leaveDeduction = excessLeaves * dayValue;
+  
+  let leaveBonus = 0;
+  let leaveDeduction = 0;
+  if (salaryType !== 'يومية') {
+    leaveBonus = remainingLeaves * dayValue;
+    leaveDeduction = excessLeaves * dayValue;
+  }
   const manualAdv      = (advRes.data?.total || 0) + (paidRes.data?.paid_advances || 0);
   const manualDed      = dedRes.data?.total || 0;
   const manualInc      = incRes.data?.total || 0;
@@ -585,8 +604,29 @@ async function deleteAttendance(id){
 }
 
 async function loadAttendance(){
-  const res = await window.db.query(
-    'SELECT a.*,e.name as emp_name FROM attendance a LEFT JOIN employees e ON a.employee_id=e.id ORDER BY a.id DESC LIMIT 100',[]);
+  const empId = document.getElementById('attFilterEmp')?.value;
+  const fromDate = document.getElementById('attFilterFrom')?.value;
+  const toDate = document.getElementById('attFilterTo')?.value;
+
+  let query = 'SELECT a.*,e.name as emp_name FROM attendance a LEFT JOIN employees e ON a.employee_id=e.id WHERE 1=1';
+  let params = [];
+
+  if (empId) {
+    query += ' AND a.employee_id = ?';
+    params.push(empId);
+  }
+  if (fromDate) {
+    query += ' AND a.date >= ?';
+    params.push(fromDate);
+  }
+  if (toDate) {
+    query += ' AND a.date <= ?';
+    params.push(toDate);
+  }
+
+  query += ' ORDER BY a.id DESC LIMIT 300';
+
+  const res = await window.db.query(query, params);
   const tbody = document.getElementById('attendanceBody');
   if(!res.success || !res.data.length){
     tbody.innerHTML = '<tr><td colspan="7" class="table-empty">لا توجد سجلات</td></tr>';
@@ -633,16 +673,170 @@ async function saveAdvance(){
   loadAdvances();
 }
 async function loadAdvances(){
-  const res=await window.db.query('SELECT a.*,e.name as emp_name FROM advances a LEFT JOIN employees e ON a.employee_id=e.id ORDER BY a.id DESC LIMIT 100',[]);
-  const tbody=document.getElementById('advancesBody');
-  if(!res.success||!res.data.length){tbody.innerHTML='<tr><td colspan="5" class="table-empty">لا توجد سلف</td></tr>';return;}
-  tbody.innerHTML=res.data.map(r=>`<tr class="${r.paid_back?'salary-row-highlight':''}">
-    <td>${r.emp_name}</td><td style="color:var(--accent);font-weight:700;">${fmt(r.amount)} جنيه</td>
-    <td>${r.date}</td><td>${r.notes||'—'}</td>
-    <td><button class="btn btn-sm btn-danger" onclick="deleteAdv(${r.id})">حذف</button></td></tr>`).join('');
+  const empId = document.getElementById('advFilterEmp').value;
+  const from = document.getElementById('advFilterFrom').value;
+  const to = document.getElementById('advFilterTo').value;
+
+  let query = 'SELECT a.*,e.name as emp_name FROM advances a LEFT JOIN employees e ON a.employee_id=e.id WHERE 1=1';
+  let params = [];
+  if (empId) { query += ' AND a.employee_id=?'; params.push(empId); }
+  if (from) { query += ' AND date(a.date) >= date(?)'; params.push(from); }
+  if (to) { query += ' AND date(a.date) <= date(?)'; params.push(to); }
+  
+  query += ' ORDER BY a.id DESC LIMIT 1000';
+
+  const res = await window.db.query(query, params);
+  const tbody = document.getElementById('advancesBody');
+  const tfoot = document.getElementById('advancesFoot');
+  
+  if(!res.success || !res.data.length){
+    tbody.innerHTML='<tr><td colspan="5" class="table-empty">لا توجد سلف للمحدد</td></tr>';
+    tfoot.style.display = 'none';
+    document.getElementById('btnAdvPrintA4').style.display = 'none';
+    document.getElementById('btnAdvPrintThermal').style.display = 'none';
+    return;
+  }
+  
+  let total = 0;
+  window.currentAdvancesData = res.data; // for printing
+  
+  tbody.innerHTML = res.data.map(r => {
+    total += r.amount || 0;
+    return `<tr class="${r.paid_back?'salary-row-highlight':''}">
+      <td>${r.emp_name}</td><td style="color:var(--accent);font-weight:700;">${fmt(r.amount)} جنيه</td>
+      <td>${r.date}</td><td>${r.notes||'—'}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteAdv(${r.id}, ${r.amount})">حذف</button></td>
+    </tr>`;
+  }).join('');
+  
+  document.getElementById('advancesTotal').textContent = fmt(total) + ' جنيه';
+  tfoot.style.display = 'table-footer-group';
+  document.getElementById('btnAdvPrintA4').style.display = 'inline-block';
+  document.getElementById('btnAdvPrintThermal').style.display = 'inline-block';
 }
+
 async function payAdvance(id){await window.db.run('UPDATE advances SET paid_back=1 WHERE id=?',[id]);loadAdvances();}
-async function deleteAdv(id){if(!confirm('حذف؟'))return;await window.db.run('DELETE FROM advances WHERE id=?',[id]);loadAdvances();}
+
+async function deleteAdv(id, amount){
+  const confirmDel = await Swal.fire({
+    title: 'تأكيد الحذف؟',
+    text: 'هل أنت متأكد من حذف هذه السلفة؟ سيتم إرجاع المبلغ إلى الخزينة تلقائياً.',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'نعم، احذف',
+    cancelButtonText: 'إلغاء'
+  });
+  if(!confirmDel.isConfirmed) return;
+  
+  await window.db.run('DELETE FROM advances WHERE id=?',[id]);
+  
+  // Restore money to treasury
+  await window.db.addTreasuryEntry('إيراد', 'استرداد سلفة محذوفة', amount, 'الخزينة');
+  
+  showToast('تم حذف السلفة وإرجاع المبلغ للخزينة', 'success');
+  loadAdvances();
+}
+
+async function printAdvancesReport(mode) {
+  const data = window.currentAdvancesData || [];
+  if(!data.length) return;
+  
+  const empSelect = document.getElementById('advFilterEmp');
+  const empName = empSelect.options[empSelect.selectedIndex]?.text || 'الكل';
+  const from = document.getElementById('advFilterFrom').value || 'البداية';
+  const to = document.getElementById('advFilterTo').value || 'الآن';
+  
+  let total = 0;
+  const rowsHtml = data.map(r => {
+    total += r.amount || 0;
+    return `<tr>
+      <td>${r.emp_name}</td>
+      <td>${fmt(r.amount)} ج</td>
+      <td>${r.date}</td>
+      <td>${r.notes || '—'}</td>
+    </tr>`;
+  }).join('');
+  
+  const settRes = await window.db.getSettings();
+  const companyName = settRes.success && settRes.data ? settRes.data.company_name : 'EL-Tarzy';
+  
+  let html = '';
+  if (mode === 'a4') {
+    html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تقرير السلف</title>
+    <style>
+      @page { size: A4; margin: 20mm; }
+      body { font-family: 'Arial', sans-serif; font-size: 14px; color: #000; line-height: 1.6; }
+      h1 { text-align:center; font-size: 22px; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; }
+      .sub { text-align:center; font-size: 14px; margin-bottom: 20px; color: #444; }
+      .filters { display:flex; justify-content:space-between; margin-bottom:20px; font-weight:bold; font-size:13px; border:1px solid #ccc; padding:10px; background:#f9f9f9; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+      th { background: #1B2A4A; color: #fff; padding: 10px; text-align: right; }
+      td { padding: 10px; border-bottom: 1px solid #ddd; }
+      tr:nth-child(even) td { background: #f8f8f8; }
+      .total-row td { background: #e8f5e9; font-weight: bold; font-size: 16px; color: #d32f2f; }
+      .footer { text-align:center; margin-top: 40px; font-size: 12px; color: #777; border-top: 1px solid #ddd; padding-top: 10px; }
+    </style></head><body>
+    <h1>${companyName}</h1>
+    <div class="sub">تقرير السلف</div>
+    <div class="filters">
+      <span>الموظف: ${empName}</span>
+      <span>الفترة: من ${from} إلى ${to}</span>
+    </div>
+    <table>
+      <thead><tr><th>الموظف</th><th>المبلغ</th><th>التاريخ</th><th>ملاحظات</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot><tr class="total-row"><td colspan="3">الإجمالي</td><td>${fmt(total)} جنيه</td></tr></tfoot>
+    </table>
+    <div class="footer">طُبع بواسطة نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    </body></html>`;
+  } else {
+    // Thermal
+    html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تقرير السلف</title>
+    <style>
+      @page { size: 80mm auto; margin: 0; }
+      body { font-family: 'Cairo', monospace; font-size: 11px; color: #000; padding: 4mm; }
+      .center { text-align: center; }
+      .bold { font-weight: 900; }
+      .line { border-top: 1px dashed #000; margin: 6px 0; }
+      table { width: 100%; border-collapse: collapse; margin-top:10px; }
+      th { text-align: right; border-bottom:1px solid #000; padding-bottom:3px; }
+      td { padding: 3px 0; border-bottom:1px dotted #ccc; font-size:10px; }
+      .total { font-size: 14px; font-weight: bold; text-align: center; margin: 10px 0; color: #000; border: 1px solid #000; padding: 5px; }
+    </style></head><body>
+    <div class="center bold" style="font-size:16px;">${companyName}</div>
+    <div class="center" style="font-size:12px;margin:4px 0;">تقرير السلف</div>
+    <div class="line"></div>
+    <div style="font-size:10px;">الموظف: ${empName}</div>
+    <div style="font-size:10px;">من: ${from} | إلى: ${to}</div>
+    <div class="line"></div>
+    <table>
+      <thead><tr><th>الموظف</th><th>المبلغ</th><th>التاريخ</th></tr></thead>
+      <tbody>
+        ${data.map(r => `<tr><td>${r.emp_name}</td><td class="bold">${fmt(r.amount)}</td><td>${r.date.split(' ')[0]}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="total">الإجمالي: ${fmt(total)} ج</div>
+    <div class="line"></div>
+    <div class="center" style="font-size:9px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    </body></html>`;
+  }
+  
+  let iframe = document.getElementById('printFrame');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'printFrame';
+    iframe.style.cssText = 'display:none;position:fixed;width:0;height:0;border:none;';
+    document.body.appendChild(iframe);
+  }
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  }, 300);
+}
 
 // ─── Deductions ───────────────────────────────────────────────────────────────
 async function saveDeduction(){
@@ -703,7 +897,7 @@ async function loadCustody(){
 }
 async function deleteCustody(id){ if(!confirm('حذف؟'))return; await window.db.run('DELETE FROM custody WHERE id=?',[id]); loadCustody(); }
 async function returnCustody(id){
-  const today=new Date().toISOString().split('T')[0];
+  const today=getLocalISODate();
   await window.db.run('UPDATE custody SET date_returned=? WHERE id=?',[today,id]);
   showToast('تم تسجيل الاسترداد ','success');loadCustody();
 }
@@ -747,24 +941,23 @@ async function loadSalaryReport(){
     let gross = 0;
     let grossLabel = '';
     const salaryType = emp.salary_type || 'ثابت';
-    let totalLateMin  = 0;
-    let totalExtraMin = 0;
+    
+    // عدد أيام الحضور الفعلية + دقائق التأخير والزيادة لجميع الموظفين
+    const attRes = await window.db.queryOne(
+      `SELECT COUNT(DISTINCT date) as days, COALESCE(SUM(late_minutes),0) as late_min, COALESCE(SUM(extra_minutes),0) as extra_min FROM attendance WHERE employee_id=? AND strftime('%Y-%m', date)=?`,
+      [emp.id, month]
+    );
+    const daysWorked  = attRes.data?.days      || 0;
+    const totalLateMin      = attRes.data?.late_min  || 0;
+    const totalExtraMin     = attRes.data?.extra_min || 0;
 
     if (salaryType === 'يومية') {
-      // عدد أيام الحضور الفعلية + دقائق التأخير والزيادة
-      const attRes = await window.db.queryOne(
-        `SELECT COUNT(DISTINCT date) as days, COALESCE(SUM(late_minutes),0) as late_min, COALESCE(SUM(extra_minutes),0) as extra_min FROM attendance WHERE employee_id=? AND strftime('%Y-%m', date)=?`,
-        [emp.id, month]
-      );
-      const daysWorked  = attRes.data?.days      || 0;
-      totalLateMin      = attRes.data?.late_min  || 0;
-      totalExtraMin     = attRes.data?.extra_min || 0;
       const dailyRate   = emp.monthly_salary || 0;
       gross = daysWorked * dailyRate;
-      grossLabel = `<small style="font-size:10px;color:gray;display:block;">${daysWorked} يوم × ${fmt(dailyRate)}</small>`;
+      grossLabel = `<small style="font-size:10px;color:gray;display:block;">حضور: ${daysWorked} يوم × ${fmt(dailyRate)}</small>`;
     } else {
       gross = emp.monthly_salary || 0;
-      grossLabel = '';
+      grossLabel = `<small style="font-size:10px;color:gray;display:block;">حضور: ${daysWorked} يوم</small>`;
     }
 
     // Leave Allowance (فقط للمرتب الشهري)
@@ -795,7 +988,7 @@ async function loadSalaryReport(){
     const paid = net <= 0 && totalPaid > 0 && Math.abs(net) < 0.01;
 
     // overtime label to show under gross
-    const overtimeSuffix = (salaryType === 'يومية' && (totalLateMin > 0 || totalExtraMin > 0))
+    const overtimeSuffix = (totalLateMin > 0 || totalExtraMin > 0)
       ? `<small style="font-size:9px;display:block;color:var(--warning);">تأخير: ${totalLateMin} دق | إضافي: ${totalExtraMin} دق</small>`
       : '';
 
@@ -832,9 +1025,16 @@ function paySalary(empId, name, gross, advances, ded, inc, net, month, salaryTyp
 
   // Show/hide overtime section
   const overtimeSection = document.getElementById('overtime_section');
-  if(salaryType === 'يومية' && (totalLateMin > 0 || totalExtraMin > 0)){
+  if(totalLateMin > 0 || totalExtraMin > 0){
     overtimeSection.style.display = 'block';
-    const defaultHourlyRate = workHours > 0 ? (dailyRate / workHours) : 0;
+    
+    let defaultHourlyRate = 0;
+    if (salaryType === 'يومية') {
+      defaultHourlyRate = workHours > 0 ? (dailyRate / workHours) : 0;
+    } else {
+      defaultHourlyRate = workHours > 0 ? ((dailyRate / 30) / workHours) : 0;
+    }
+    
     document.getElementById('pay_hourly_rate').value = defaultHourlyRate.toFixed(2);
 
     const lateRow  = document.getElementById('late_row');
@@ -860,12 +1060,14 @@ function paySalary(empId, name, gross, advances, ded, inc, net, month, salaryTyp
   document.getElementById('payPartialAmount').value = net.toFixed(2);
   document.getElementById('payCashAmount').value    = net.toFixed(2);
   document.getElementById('payVodafoneAmount').value= '0';
+  document.getElementById('payInstapayAmount').value= '0';
   document.getElementById('paySplitHint').textContent = '';
 
   document.getElementById('payPartialAmount').oninput = function(){
     const total = parseFloat(this.value)||0;
     document.getElementById('payCashAmount').value   = total.toFixed(2);
     document.getElementById('payVodafoneAmount').value = '0';
+    document.getElementById('payInstapayAmount').value = '0';
     document.getElementById('paySplitHint').textContent = '';
   };
 
@@ -873,16 +1075,17 @@ function paySalary(empId, name, gross, advances, ded, inc, net, month, salaryTyp
     let totalToPay = parseFloat(document.getElementById('payPartialAmount').value)||0;
     const cashAmt     = parseFloat(document.getElementById('payCashAmount').value)||0;
     const vodafoneAmt = parseFloat(document.getElementById('payVodafoneAmount').value)||0;
+    const instapayAmt = parseFloat(document.getElementById('payInstapayAmount').value)||0;
 
     if(totalToPay <= 0){ showToast('يرجى إدخال مبلغ صحيح','error'); return; }
 
-    const splitTotal = cashAmt + vodafoneAmt;
+    const splitTotal = cashAmt + vodafoneAmt + instapayAmt;
     if(Math.abs(splitTotal - totalToPay) > 0.01){
       showToast(`مجموع التقسيم (${fmt(splitTotal)}) لا يساوي المبلغ المراد صرفه (${fmt(totalToPay)})`, 'error');
       return;
     }
 
-    const salaryData = { ...pendingSalary, net_salary: totalToPay, cash_amount: cashAmt, vodafone_amount: vodafoneAmt };
+    const salaryData = { ...pendingSalary, net_salary: totalToPay, cash_amount: cashAmt, vodafone_amount: vodafoneAmt, instapay_amount: instapayAmt };
     const res = await window.db.paySalary(salaryData);
     if(res.success){
       const partialNote = totalToPay < net ? ` (${fmt(totalToPay)} جنيه من أصل ${fmt(net)})` : '';
@@ -933,19 +1136,15 @@ function syncPaySplit(changedField){
   const total = parseFloat(document.getElementById('payPartialAmount').value)||0;
   const cashEl = document.getElementById('payCashAmount');
   const vodafoneEl = document.getElementById('payVodafoneAmount');
+  const instapayEl = document.getElementById('payInstapayAmount');
   const hint = document.getElementById('paySplitHint');
   
-  if(changedField === 'cash'){
-    const cash = parseFloat(cashEl.value)||0;
-    const remaining = Math.max(0, total - cash);
-    vodafoneEl.value = remaining.toFixed(2);
-  } else {
-    const vodafone = parseFloat(vodafoneEl.value)||0;
-    const remaining = Math.max(0, total - vodafone);
-    cashEl.value = remaining.toFixed(2);
-  }
+  // We won't auto-calculate with 3 fields, just show the sum validation
+  const cash = parseFloat(cashEl.value)||0;
+  const vodafone = parseFloat(vodafoneEl.value)||0;
+  const instapay = parseFloat(instapayEl.value)||0;
   
-  const splitTotal = (parseFloat(cashEl.value)||0) + (parseFloat(vodafoneEl.value)||0);
+  const splitTotal = cash + vodafone + instapay;
   if(Math.abs(splitTotal - total) > 0.01){
     hint.textContent = `⚠️ مجموع التقسيم: ${fmt(splitTotal)} | المطلوب: ${fmt(total)}`;
     hint.style.color = 'var(--danger)';
@@ -1030,6 +1229,8 @@ async function loadEmpSales(){
   document.getElementById('empSalesRemaining').textContent=fmt(totals.rem);
   document.getElementById('empSalesFoot').style.display='';
 }
+
+
 
 // ─── Admin Check & Quit ───────────────────────────────────────────────────────
 async function checkAdmin() {

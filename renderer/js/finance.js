@@ -1,6 +1,6 @@
-﻿
 
-const sectionTitles={'expenses':'المصروفات','revenues':'الإيرادات الأخرى','treasury':'الخزينة','vodafone':'فودافون كاش','customers-accounts':'حسابات العملاء','suppliers-accounts':'حسابات الموردين','stats':'إحصائيات مهمة'};
+
+const sectionTitles={'expenses':'المصروفات','revenues':'الإيرادات الأخرى','treasury':'الخزينة','vodafone':'فودافون كاش','instapay':'إنستا باي','customers-accounts':'حسابات العملاء','suppliers-accounts':'حسابات الموردين','stats':'إحصائيات مهمة'};
 
 window.finCache = window.finCache || {};
 
@@ -16,6 +16,7 @@ function showSection(name){
     if(name==='revenues'){loadRevenues();loadEmpSelect('rev_emp');}
     if(name==='treasury') loadTreasury('الخزينة');
     if(name==='vodafone') loadTreasury('فودافون كاش');
+    if(name==='instapay') loadTreasury('إنستا باي');
     if(name==='customers-accounts') loadCustomerAccounts();
     if(name==='suppliers-accounts') loadSupplierAccounts();
     if(name==='stats') loadStats();
@@ -63,9 +64,9 @@ function printCurrentSection(mode) {
     totalHtmlFn = () => `<tr class="total-row"><td colspan="1">الإجمالي</td><td colspan="3" style="color:green;">${Number(total).toFixed(2)} جنيه</td></tr>`;
     thermalRowFn = r => `<div class="row"><span>${r.description||'—'} | ${r.date}</span><span class="bold">${Number(r.amount||0).toFixed(2)} ج</span></div>`;
     totalLabel = `الإجمالي: ${Number(total).toFixed(2)} جنيه`;
-  } else if (activeSection === 'treasury' || activeSection === 'vodafone') {
+  } else if (activeSection === 'treasury' || activeSection === 'vodafone' || activeSection === 'instapay') {
     data = window._currentTreasuryData;
-    title = `تقرير ${activeSection === 'vodafone' ? 'فودافون كاش' : 'الخزينة'}`;
+    title = `تقرير ${activeSection === 'vodafone' ? 'فودافون كاش' : activeSection === 'instapay' ? 'إنستا باي' : 'الخزينة'}`;
     thHtml = '<th>النوع</th><th>البيان</th><th>المبلغ</th><th>الرصيد بعد</th><th>التاريخ</th><th>الوقت</th>';
     tdHtmlFn = r => `<td>${r.type}</td><td>${r.description||'—'}</td><td style="font-weight:700;">${Number(r.amount||0).toFixed(2)} ج</td><td>${Number(r.balance_after||0).toFixed(2)} ج</td><td>${r.date}</td><td>${r.time||'—'}</td>`;
     totalHtmlFn = () => '';
@@ -120,7 +121,7 @@ function printCurrentSection(mode) {
         ${totalHtmlFn()}
       </tbody>
     </table>
-    <div class="footer">طُبع من نظام إدارة الترزي — ${new Date().toLocaleDateString('ar-EG')}</div>
+    <div class="footer">طُبع من نظام إدارة الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   } else {
     html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${title}</title>
@@ -142,7 +143,7 @@ function printCurrentSection(mode) {
     ${data.map(r=>thermalRowFn(r)).join('')}
     <div class="line"></div>
     ${totalLabel ? `<div class="total">${totalLabel}</div><div class="line"></div>` : ''}
-    <div class="center" style="font-size:11px;margin-top:4px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG')}</div>
+    <div class="center" style="font-size:11px;margin-top:4px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   }
 
@@ -201,11 +202,12 @@ async function saveExpense(){
   const typeEl=document.getElementById('exp_type');const typeName=typeEl.options[typeEl.selectedIndex].text;
   const desc=document.getElementById('exp_desc').value.trim();const empId=document.getElementById('exp_emp').value;
   const source=document.getElementById('exp_source').value;
-  const today=new Date().toISOString().split('T')[0];const time=new Date().toTimeString().slice(0,5);
-  const res=await window.db.run('INSERT INTO expenses (type_id,type_name,amount,description,employee_id,payment_source,date,time) VALUES (?,?,?,?,?,?,?,?)',
-    [typeId,typeName,amt,desc,empId||null,source,today,time]);
+  const today=getLocalISODate();const time=new Date().toTimeString().slice(0,5);
+  const shiftId=sessionStorage.getItem('elTarzy_shiftId');
+  const res=await window.db.run('INSERT INTO expenses (type_id,type_name,amount,description,employee_id,payment_source,date,time,shift_id) VALUES (?,?,?,?,?,?,?,?,?)',
+    [typeId,typeName,amt,desc,empId||null,source,today,time,shiftId?parseInt(shiftId):null]);
   if(res.success){
-    await window.db.addTreasuryEntry('مصروف',typeName+': '+desc,amt,source==='فودافون كاش'?'فودافون كاش':'الخزينة');
+    await window.db.addTreasuryEntry('مصروف',typeName+': '+desc,amt,source==='فودافون كاش'?'فودافون كاش':(source==='إنستا باي'?'إنستا باي':'الخزينة'));
     showToast(`تم تسجيل مصروف ${fmt(amt)} جنيه `,'success');
     document.getElementById('exp_amount').value='';document.getElementById('exp_desc').value='';
     loadExpenses();
@@ -235,7 +237,7 @@ async function loadExpenses(){
     <td style="font-weight:700;color:var(--danger);">${fmt(r.amount)}</td>
     <td>${r.date}</td><td style="color:var(--text-muted);">${r.time||'—'}</td>
     <td>${r.description||'—'}</td><td>${r.emp_name||'—'}</td>
-    <td><span class="badge ${r.payment_source==='فودافون كاش'?'badge-info':'badge-success'}">${r.payment_source||'خزينة'}</span></td>
+    <td><span class="badge ${r.payment_source==='فودافون كاش'?'badge-info':(r.payment_source==='إنستا باي'?'badge-accent':'badge-success')}">${r.payment_source||'خزينة'}</span></td>
     <td>${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="deleteExpense(${r.id})">حذف</button>` : '—'}</td>
   </tr>`).join('');
   const total=res.data.reduce((s,r)=>s+(r.amount||0),0);
@@ -257,7 +259,7 @@ async function deleteExpense(id){
     await window.db.addTreasuryEntry('إيراد', `استرداد مصروف محذوف: ${exp.type_name||''} - ${exp.description||''}`, exp.amount, refundTreasury);
     await window.db.run('DELETE FROM expenses WHERE id=?',[id]);
     loadExpenses();
-    const src = refundTreasury === 'فودافون كاش' ? 'فودافون كاش' : 'الخزينة';
+    const src = refundTreasury === 'فودافون كاش' ? 'فودافون كاش' : (refundTreasury === 'إنستا باي' ? 'إنستا باي' : 'الخزينة');
     showToast('تم الحذف واسترداد ' + fmt(exp.amount) + ' جنيه من ' + src + ' ✅','success');
   } else {
     showToast('حدث خطأ أثناء استرجاع بيانات المصروف', 'error');
@@ -269,7 +271,7 @@ async function saveRevenue(){
   const desc=document.getElementById('rev_desc').value.trim();const amt=parseFloat(document.getElementById('rev_amount').value);
   if(!desc||!amt||amt<=0){showToast('يرجى إدخال البيان والمبلغ','error');return;}
   const empId=document.getElementById('rev_emp').value;
-  const today=new Date().toISOString().split('T')[0];
+  const today=getLocalISODate();
   const res=await window.db.run('INSERT INTO revenues (description,amount,date,employee_id) VALUES (?,?,?,?)',[desc,amt,today,empId||null]);
   if(res.success){
     await window.db.addTreasuryEntry('إيراد',desc,amt,'الخزينة');
@@ -302,10 +304,11 @@ async function deleteRevenue(id){if(!confirm('حذف؟'))return;await window.db.
 // ─── Treasury ─────────────────────────────────────────────────────────────────
 async function loadTreasury(type='الخزينة'){
   const isVodafone=type==='فودافون كاش';
+  const isInstapay=type==='إنستا باي';
   const balRes=await window.db.getTreasuryBalance(type);
   if(balRes.success){
-    const balEl=document.getElementById(isVodafone?'vodafoneBalance':'treasuryBalance1');
-    if(balEl) balEl.textContent=Number(balRes.data).toLocaleString('ar-EG')+' جنيه';
+    const balEl=document.getElementById(isVodafone?'vodafoneBalance':(isInstapay?'instapayBalance':'treasuryBalance1'));
+    if(balEl) balEl.textContent=Number(balRes.data).toLocaleString('en-US')+' جنيه';
   }
   const from=document.getElementById('filterFrom').value;
   const to=document.getElementById('filterTo').value;
@@ -315,17 +318,17 @@ async function loadTreasury(type='الخزينة'){
   if(to){sql+=' AND date<=?';params.push(to);}
   sql+=' ORDER BY id DESC LIMIT 200';
   const res=await window.db.query(sql,params);
-  const bodyId=isVodafone?'vodafoneBody':'treasuryBody';
+  const bodyId=isVodafone?'vodafoneBody':(isInstapay?'instapayBody':'treasuryBody');
   const tbody=document.getElementById(bodyId);
   if(!res.success||!res.data.length){tbody.innerHTML='<tr><td colspan="6" class="table-empty">لا توجد حركات</td></tr>';return;}
   window._currentTreasuryData = res.data;
   window._currentTreasuryType = type;
-  if(!isVodafone){
+  if(!isVodafone && !isInstapay){
     const inc=res.data.filter(r=>r.type==='إيراد').reduce((s,r)=>s+(r.amount||0),0);
     const exp=res.data.filter(r=>r.type!=='إيراد').reduce((s,r)=>s+(r.amount||0),0);
     const incEl=document.getElementById('treasuryIncome');const expEl=document.getElementById('treasuryExpenses');
-    if(incEl) incEl.textContent=Number(inc).toLocaleString('ar-EG')+' جنيه';
-    if(expEl) expEl.textContent=Number(exp).toLocaleString('ar-EG')+' جنيه';
+    if(incEl) incEl.textContent=Number(inc).toLocaleString('en-US')+' جنيه';
+    if(expEl) expEl.textContent=Number(exp).toLocaleString('en-US')+' جنيه';
   }
   tbody.innerHTML=res.data.map(r=>`<tr>
     <td><span class="badge ${r.type==='إيراد'?'badge-success':'badge-danger'}">${r.type}</span></td>
@@ -403,10 +406,10 @@ async function loadStats(){
   const expRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE 1=1${from?' AND date>=?':''}${to?' AND date<=?':''}`,[from,to].filter(Boolean));
   const revRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM revenues WHERE 1=1${from?' AND date>=?':''}${to?' AND date<=?':''}`,[from,to].filter(Boolean));
   const sales=salesRes.data?.total||0;const exp=expRes.data?.total||0;const rev=revRes.data?.total||0;
-  document.getElementById('st_totalSales').textContent=Number(sales).toLocaleString('ar-EG');
-  document.getElementById('st_totalExp').textContent=Number(exp).toLocaleString('ar-EG');
-  document.getElementById('st_totalRev').textContent=Number(rev).toLocaleString('ar-EG');
-  document.getElementById('st_netProfit').textContent=Number(sales+rev-exp).toLocaleString('ar-EG');
+  document.getElementById('st_totalSales').textContent=Number(sales).toLocaleString('en-US');
+  document.getElementById('st_totalExp').textContent=Number(exp).toLocaleString('en-US');
+  document.getElementById('st_totalRev').textContent=Number(rev).toLocaleString('en-US');
+  document.getElementById('st_netProfit').textContent=Number(sales+rev-exp).toLocaleString('en-US');
   const topExpRes=await window.db.query('SELECT type_name,SUM(amount) as total FROM expenses GROUP BY type_name ORDER BY total DESC LIMIT 10',[]);
   const totExp=topExpRes.data?.reduce((s,r)=>s+(r.total||0),0)||1;
   document.getElementById('topExpTypesBody').innerHTML=(topExpRes.data||[]).map(r=>`<tr>
@@ -443,17 +446,23 @@ async function checkAdmin() {
 
 window.electron.onConfirmBackupBeforeQuit(() => {
   Swal.fire({
-    title: 'إغلاق البرنامج', text: 'هل تريد إنشاء نسخة احتياطية قبل الخروج؟', icon: 'question',
-    showDenyButton: true, showCancelButton: true, confirmButtonText: 'نسخ وخروج', denyButtonText: 'خروج بدون نسخة', cancelButtonText: 'إلغاء'
-  }).then((r) => {
-    if (r.isConfirmed) window.electron.quitWithBackup();
-    else if (r.isDenied) window.electron.quitWithoutBackup();
-    else window.electron.cancelQuit();
+    title: 'إغلاق البرنامج',
+    html: `
+      <p style="font-size:14px;font-weight:600;margin-bottom:8px;">هل تريد إنشاء نسخة احتياطية قبل الخروج؟</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
+        <button class="btn btn-primary" onclick="Swal.close(); sendDailyReportAndQuit();">إرسال التقرير وإنهاء</button>
+        <button class="btn btn-success" onclick="Swal.close(); window.electron.quitWithBackup();">نسخ وخروج</button>
+        <button class="btn btn-danger" onclick="Swal.close(); window.electron.quitWithoutBackup();">خروج بدون نسخة</button>
+        <button class="btn btn-outline" onclick="Swal.close(); window.electron.cancelQuit();">إلغاء</button>
+      </div>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false
   });
 });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
-const today=new Date().toISOString().split('T')[0];
+const today=getLocalISODate();
 const firstDay=today.slice(0,7)+'-01';
 document.getElementById('filterFrom').value=firstDay;
 document.getElementById('filterTo').value=today;
