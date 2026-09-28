@@ -6,9 +6,13 @@ window.finCache = window.finCache || {};
 
 function showSection(name){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.fin-nav-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('section-'+name).classList.add('active');
-  document.querySelectorAll('.fin-nav-btn').forEach(b=>{ if(b.onclick&&b.onclick.toString().includes(`'${name}'`)) b.classList.add('active'); });
+  document.querySelectorAll('.fin-nav-btn, .sidebar-nav-item').forEach(b=>b.classList.remove('active'));
+  const targetSec = document.getElementById('section-'+name);
+  if(targetSec) targetSec.classList.add('active');
+  document.querySelectorAll('.fin-nav-btn, .sidebar-nav-item').forEach(b=>{
+    const oc = b.getAttribute('onclick') || (b.onclick ? b.onclick.toString() : '');
+    if(oc.includes(`'${name}'`)) b.classList.add('active');
+  });
   document.getElementById('finSectionTitle').textContent=sectionTitles[name]||name;
   
   if (!window.finCache[name]) {
@@ -26,12 +30,18 @@ function showSection(name){
 
 function applyFilter(){
   window.finCache = {};
-  loadExpenses();
-  loadRevenues();
-  loadTreasury('الخزينة');
+  const activeSec = document.querySelector('.section.active')?.id.replace('section-', '') || 'expenses';
+  if(activeSec === 'expenses') loadExpenses();
+  else if(activeSec === 'revenues') loadRevenues();
+  else if(activeSec === 'treasury') loadTreasury('الخزينة');
+  else if(activeSec === 'vodafone') loadTreasury('فودافون كاش');
+  else if(activeSec === 'instapay') loadTreasury('إنستا باي');
+  else if(activeSec === 'customers-accounts') loadCustomerAccounts();
+  else if(activeSec === 'suppliers-accounts') loadSupplierAccounts();
+  else if(activeSec === 'stats') loadStats();
 }
 
-function printCurrentSection(mode) {
+async function printCurrentSection(mode) {
   const activeSection = document.querySelector('.section.active').id.replace('section-', '');
   const from = document.getElementById('filterFrom').value;
   const to = document.getElementById('filterTo').value;
@@ -65,13 +75,38 @@ function printCurrentSection(mode) {
     thermalRowFn = r => `<div class="row"><span>${r.description||'—'} | ${r.date}</span><span class="bold">${Number(r.amount||0).toFixed(2)} ج</span></div>`;
     totalLabel = `الإجمالي: ${Number(total).toFixed(2)} جنيه`;
   } else if (activeSection === 'treasury' || activeSection === 'vodafone' || activeSection === 'instapay') {
-    data = window._currentTreasuryData;
-    title = `تقرير ${activeSection === 'vodafone' ? 'فودافون كاش' : activeSection === 'instapay' ? 'إنستا باي' : 'الخزينة'}`;
+    const trType = activeSection === 'vodafone' ? 'فودافون كاش' : (activeSection === 'instapay' ? 'إنستا باي' : 'الخزينة');
+    title = `تقرير حركة ${trType}`;
+
+    // Always fetch fresh, accurately filtered data for the exact active treasury type
+    let sql = 'SELECT * FROM treasury WHERE treasury_type=?';
+    let params = [trType];
+    if (from) { sql += ' AND date>=?'; params.push(from); }
+    if (to) { sql += ' AND date<=?'; params.push(to); }
+    sql += ' ORDER BY id DESC LIMIT 500';
+
+    const trRes = await window.db.query(sql, params);
+    data = (trRes && trRes.success && trRes.data) ? trRes.data : [];
+
+    const inTotal = data.filter(r => r.type === 'إيراد').reduce((s, r) => s + (r.amount || 0), 0);
+    const outTotal = data.filter(r => r.type !== 'إيراد').reduce((s, r) => s + (r.amount || 0), 0);
+    const netPeriod = inTotal - outTotal;
+
+    const balRes = await window.db.getTreasuryBalance(trType);
+    const curBal = (balRes && balRes.success) ? Number(balRes.data || 0) : 0;
+
     thHtml = '<th>النوع</th><th>البيان</th><th>المبلغ</th><th>الرصيد بعد</th><th>التاريخ</th><th>الوقت</th>';
-    tdHtmlFn = r => `<td>${r.type}</td><td>${r.description||'—'}</td><td style="font-weight:700;">${Number(r.amount||0).toFixed(2)} ج</td><td>${Number(r.balance_after||0).toFixed(2)} ج</td><td>${r.date}</td><td>${r.time||'—'}</td>`;
-    totalHtmlFn = () => '';
+    tdHtmlFn = r => `<td><span style="color:${r.type==='إيراد'?'green':'red'};font-weight:700;">${r.type}</span></td><td>${r.description||'—'}</td><td style="font-weight:700;">${Number(r.amount||0).toFixed(2)} ج</td><td>${Number(r.balance_after||0).toFixed(2)} ج</td><td>${r.date}</td><td>${r.time||'—'}</td>`;
+    
+    totalHtmlFn = () => `
+      <tr class="total-row">
+        <td colspan="2" style="color:green;font-weight:700;">إجمالي الوارد: ${inTotal.toFixed(2)} جنيه</td>
+        <td colspan="2" style="color:red;font-weight:700;">إجمالي الصادر: ${outTotal.toFixed(2)} جنيه</td>
+        <td colspan="2" style="font-weight:900;">الرصيد الحالي: ${curBal.toFixed(2)} جنيه (صافي الفترة: ${netPeriod.toFixed(2)} ج)</td>
+      </tr>
+    `;
     thermalRowFn = r => `<div class="row"><span>${r.type} | ${r.date}</span><span class="bold">${Number(r.amount||0).toFixed(2)} ج</span></div><div class="desc">${r.description||''}</div>`;
-    totalLabel = '';
+    totalLabel = `وارد: ${inTotal.toFixed(2)} ج | صادر: ${outTotal.toFixed(2)} ج | رصيد: ${curBal.toFixed(2)} ج`;
   } else if (activeSection === 'customers-accounts') {
     data = window._currentCustomerAccountsData;
     title = 'تقرير حسابات العملاء';
@@ -95,7 +130,16 @@ function printCurrentSection(mode) {
     return;
   }
 
-  if(!data || !data.length){ showToast('لا توجد بيانات للطباعة','warning'); return; }
+  if(!data || !data.length){ showToast('لا توجد بيانات للطباعة في هذا القسم لهذه الفترة','warning'); return; }
+
+  // Fetch shop name dynamically
+  let shopName = 'DRY CLEAN';
+  try {
+    const setRes = await window.db.getSettings();
+    if(setRes && setRes.data && setRes.data.company_name && setRes.data.company_name.trim()){
+      shopName = setRes.data.company_name.trim();
+    }
+  } catch(e) {}
 
   let html = '';
   if(isA4){
@@ -112,7 +156,7 @@ function printCurrentSection(mode) {
       .total-row td { font-weight:900; background:#fef3c7; font-size:13px; }
       .footer { text-align:center; margin-top:20px; font-size:10px; color:#888; border-top:1px solid #ddd; padding-top:8px; }
     </style></head><body>
-    <h1>EL-Tarzy — الترزي</h1>
+    <h1>${shopName}</h1>
     <div class="sub">${title} — ${period}</div>
     <table>
       <thead><tr>${thHtml}</tr></thead>
@@ -121,7 +165,7 @@ function printCurrentSection(mode) {
         ${totalHtmlFn()}
       </tbody>
     </table>
-    <div class="footer">طُبع من نظام إدارة الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    <div class="footer">طُبع من نظام ${shopName} — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   } else {
     html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${title}</title>
@@ -136,14 +180,14 @@ function printCurrentSection(mode) {
       .desc { font-size:11px; color:#444; padding-right:4px; margin-bottom:3px; }
       .total { font-size:16px; font-weight:900; text-align:center; margin:6px 0; }
     </style></head><body>
-    <div class="center bold" style="font-size:18px;margin-bottom:3px;">EL-Tarzy</div>
+    <div class="center bold" style="font-size:18px;margin-bottom:3px;">${shopName}</div>
     <div class="center" style="font-size:13px;">${title}</div>
     <div class="center" style="font-size:12px;margin-bottom:4px;">${period}</div>
     <div class="line"></div>
     ${data.map(r=>thermalRowFn(r)).join('')}
     <div class="line"></div>
     ${totalLabel ? `<div class="total">${totalLabel}</div><div class="line"></div>` : ''}
-    <div class="center" style="font-size:11px;margin-top:4px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    <div class="center" style="font-size:11px;margin-top:4px;">نظام ${shopName} — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   }
 

@@ -1,7 +1,35 @@
 
 function fmt(n){ return Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
-// ─── Tabs ────────────────────────────────────────────────────────────────────
+// ─── Tabs & Auto-Refresh ─────────────────────────────────────────────────────
+let _salesAutoRefreshTimer = null;
+
+function startSalesAutoRefresh() {
+  if (_salesAutoRefreshTimer) clearInterval(_salesAutoRefreshTimer);
+  _salesAutoRefreshTimer = setInterval(() => {
+    const secSales = document.getElementById('sec-sales');
+    if (!secSales || !secSales.classList.contains('active')) return;
+
+    // Do not reload if a Swal popup is currently open
+    if (typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) return;
+
+    // Do not reload if user is actively typing in any input field
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT' || activeEl.tagName === 'TEXTAREA')) {
+      return;
+    }
+
+    loadSalesReport();
+  }, 5000);
+}
+
+function stopSalesAutoRefresh() {
+  if (_salesAutoRefreshTimer) {
+    clearInterval(_salesAutoRefreshTimer);
+    _salesAutoRefreshTimer = null;
+  }
+}
+
 function switchTab(tabId, btn) {
   document.querySelectorAll('.rpt-tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
@@ -9,7 +37,12 @@ function switchTab(tabId, btn) {
   document.querySelectorAll('.rpt-section').forEach(s => s.classList.remove('active'));
   document.getElementById('sec-' + tabId).classList.add('active');
   
-  if(tabId === 'sales') loadSalesReport();
+  if(tabId === 'sales') {
+    loadSalesReport();
+    startSalesAutoRefresh();
+  } else {
+    stopSalesAutoRefresh();
+  }
   if(tabId === 'purchases') loadPurchasesReport();
   if(tabId === 'shifts') loadShiftsReport();
   if(tabId === 'income') loadIncomeStatement();
@@ -27,43 +60,28 @@ document.getElementById('shiftFrom').value = firstDay;
 document.getElementById('shiftTo').value = today;
 document.getElementById('incomeMonth').value = today.slice(0,7);
 
-// ─── Tailors Dropdown ──────────────────────────────────────────────────────────
-async function loadTailorsDropdown() {
-  const select = document.getElementById('salesTailorFilter');
-  if(!select) return;
-  const res = await window.db.query("SELECT id, name FROM employees WHERE job_title LIKE '%خياط%' OR job_title LIKE '%ترزي%' OR employee_type='عادي' OR is_active=1");
-  if(res.success && res.data) {
-    let options = '<option value="">الكل</option>';
-    res.data.forEach(t => options += `<option value="${t.id}">${t.name}</option>`);
-    select.innerHTML = options;
-  }
-}
-
 // ─── Sales Report ─────────────────────────────────────────────────────────────
 async function loadSalesReport() {
   const from = document.getElementById('salesFrom').value;
   const to = document.getElementById('salesTo').value;
   const search = document.getElementById('salesSearch').value.trim();
   const statusFilter = document.getElementById('salesStatusFilter')?.value || '';
-  const tailorFilter = document.getElementById('salesTailorFilter')?.value || '';
   
   let sql = `SELECT i.*, 
                     c.name as customer_name,
                     e.name as emp_name,
-                    t.name as tailor_name,
+                    d.name as driver_name,
                     (i.net_total - COALESCE(rr.total_returned, 0)) as dynamic_net_total
              FROM invoices i 
              LEFT JOIN customers c ON i.customer_id = c.id 
              LEFT JOIN employees e ON i.employee_id = e.id
-             LEFT JOIN employees t ON i.tailor_id = t.id
+             LEFT JOIN employees d ON i.driver_id = d.id
              LEFT JOIN (SELECT original_invoice_id, SUM(total_returned) as total_returned FROM returns GROUP BY original_invoice_id) rr ON rr.original_invoice_id = i.id
              WHERE 1=1`;
   const params = [];
 
   // ─── منطق البحث + التاريخ ──────────────────────────────────────────────────
-  // لو البحث برقم فاتورة (أرقام أو يبدأ بحرف/رقم) → ابحث في كل الفواتير بدون قيد التاريخ
-  // لو البحث باسم عميل فقط → خلي شرط التاريخ شغال
-  const isInvoiceNumberSearch = search && (search.toLowerCase().includes('inv') || /\d/.test(search)); // يحتوي على أرقام أو كلمة inv
+  const isInvoiceNumberSearch = search && (search.toLowerCase().includes('inv') || /\d/.test(search));
 
   if(search) {
     sql += ` AND (i.invoice_number LIKE ? OR c.name LIKE ?)`;
@@ -83,18 +101,13 @@ async function loadSalesReport() {
     params.push(statusFilter);
   }
 
-  if(tailorFilter) {
-    sql += ` AND i.tailor_id = ?`;
-    params.push(tailorFilter);
-  }
-
   sql += ' ORDER BY i.id DESC';
   
   const res = await window.db.query(sql, params);
   const tbody = document.getElementById('salesTableBody');
   
   if(!res.success || !res.data.length) {
-    tbody.innerHTML = '<tr><td colspan="13" class="table-empty">لا توجد مبيعات تطابق البحث</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" class="table-empty">لا توجد مبيعات تطابق البحث</td></tr>';
     document.getElementById('salesTotal').textContent = '0.00';
     document.getElementById('salesPaid').textContent = '0.00';
     document.getElementById('salesDelivered').textContent = '0';
@@ -110,25 +123,33 @@ async function loadSalesReport() {
       p: s.p + (r.amount_paid || 0),
       rem: s.rem + (r.remaining || 0),
       delivered: s.delivered + (r.status === 'تم التسليم' ? 1 : 0),
+      outForDelivery: s.outForDelivery + (r.status === 'خرج للتوصيل' ? 1 : 0),
       inProgress: s.inProgress + (r.status === 'تحت الشغل' ? 1 : 0),
       awaiting: s.awaiting + (r.status === 'في انتظار الاستلام' ? 1 : 0),
-      unpaidAmt: s.unpaidAmt + (r.remaining > 0 ? r.remaining : 0)
+      unpaidAmt: s.unpaidAmt + (r.remaining > 0 ? r.remaining : 0),
+      totalBags: s.totalBags + (r.bag_count || 0)
     };
-  }, { t: 0, p: 0, rem: 0, delivered: 0, inProgress: 0, awaiting: 0, unpaidAmt: 0 });
+  }, { t: 0, p: 0, rem: 0, delivered: 0, outForDelivery: 0, inProgress: 0, awaiting: 0, unpaidAmt: 0, totalBags: 0 });
   
   tbody.innerHTML = res.data.map(r => {
-    const statusColor = r.status === 'تم التسليم' ? 'success' : (r.status === 'في انتظار الاستلام' ? 'primary' : 'warning');
+    const statusColor = r.status === 'تم التسليم' ? 'success' : (r.status === 'خرج للتوصيل' ? 'info' : (r.status === 'في انتظار الاستلام' ? 'primary' : 'warning'));
     const statusBadge = r.is_returned
       ? `<span class="badge badge-danger" title="فاتورة مرتجعة - لا يمكن تغيير الحالة">${r.status || 'مرتجع'}</span>`
-      : `<span class="badge badge-${statusColor}" style="cursor:pointer;" onclick="changeInvoiceStatus(${r.id}, '${r.status}', ${r.remaining || 0})"><bdi>${r.status || 'تحت الشغل'}</bdi> ✎</span>`;
+      : `<span class="badge badge-${statusColor}" style="cursor:pointer;" onclick="changeInvoiceStatus(${r.id}, '${r.status}', ${r.remaining || 0}, ${r.is_delivery ? 1 : 0})"><bdi>${r.status || 'تحت الشغل'}</bdi> ✎</span>`;
+
+    const bagBadge = (r.bag_count > 0)
+      ? `<span class="badge" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-weight:800;font-size:12px;padding:3px 8px;white-space:nowrap;">🛍️ ${r.bag_count} ${r.bag_count === 1 ? 'كيس' : (r.bag_count === 2 ? 'كيسين' : 'أكياس')}</span>`
+      : `<span style="color:var(--text-muted);font-size:12px;">—</span>`;
+
     return `
       <tr class="${r.is_returned?'bg-red-50':''}">
-        <td style="font-weight:700;color:var(--primary);">${r.invoice_number} ${r.is_returned?'<span class="badge badge-danger">مرتجع</span>':''}</td>
+        <td style="font-weight:700;color:var(--primary);">${r.invoice_number} ${r.is_express ? '<span class="badge" style="background:#f59e0b;color:#000;font-size:10px;">⚡ سريع</span>' : ''} ${r.is_delivery ? '<span class="badge badge-info" style="font-size:10px;">🛵 دليفري</span>' : ''} ${r.is_returned?'<span class="badge badge-danger">مرتجع</span>':''}</td>
         <td>${r.invoice_date}</td>
         <td>${r.customer_name || 'عميل نقدي'}</td>
-        <td style="font-weight:600;color:var(--primary);">${r.tailor_name || '—'}</td>
+        <td style="font-weight:600;color:#0284c7;">${r.driver_name ? '🛵 ' + r.driver_name : '—'}</td>
         <td>${r.emp_name || '—'}</td>
         <td>${statusBadge}</td>
+        <td>${bagBadge}</td>
         <td><span class="badge ${r.payment_method==='أجل'?'badge-warning':'badge-success'}">${r.payment_method}</span></td>
         <td>${fmt(r.subtotal)}</td>
         <td style="color:var(--danger);">${fmt((r.discount_amount||0) + ((r.subtotal||0)*(r.discount_percent||0)/100))}</td>
@@ -147,20 +168,28 @@ async function loadSalesReport() {
   document.getElementById('salesTotal').textContent = fmt(totals.t);
   document.getElementById('salesPaid').textContent = fmt(totals.p);
   document.getElementById('salesDelivered').textContent = totals.delivered;
+  if (document.getElementById('salesOutForDelivery')) {
+    document.getElementById('salesOutForDelivery').textContent = totals.outForDelivery;
+  }
   document.getElementById('salesInProgress').textContent = totals.inProgress;
   document.getElementById('salesAwaiting').textContent = totals.awaiting;
   document.getElementById('salesUnpaidAmount').textContent = fmt(totals.unpaidAmt);
 }
 
-async function changeInvoiceStatus(id, currentStatus, remainingAmount) {
+async function changeInvoiceStatus(id, currentStatus, remainingAmount, isDelivery = 0) {
+  const inputOptions = {
+    'تحت الشغل': '🛠️ تحت الشغل',
+    'في انتظار الاستلام': '📦 في انتظار الاستلام',
+  };
+  if (isDelivery) {
+    inputOptions['خرج للتوصيل'] = '🚚 خرج للتوصيل';
+  }
+  inputOptions['تم التسليم'] = '✅ تم التسليم';
+
   const { value: newStatus } = await Swal.fire({
     title: 'تغيير حالة الفاتورة',
     input: 'select',
-    inputOptions: {
-      'تحت الشغل': '🛠️ تحت الشغل',
-      'في انتظار الاستلام': '📦 في انتظار الاستلام',
-      'تم التسليم': '✅ تم التسليم'
-    },
+    inputOptions: inputOptions,
     inputValue: currentStatus || 'تحت الشغل',
     showCancelButton: true,
     confirmButtonText: 'تغيير',
@@ -170,19 +199,63 @@ async function changeInvoiceStatus(id, currentStatus, remainingAmount) {
 
   if (!newStatus || newStatus === currentStatus) return;
 
-  // لو اختار "تم التسليم" وفيه مبلغ متبقي → اسأله عن الخزنة وسدد أولاً وابعت رسالة واحدة
+  // 1) في حالة "خرج للتوصيل": تخيير بين التسديد الآن أو التحصيل بعد التسليم
+  if (newStatus === 'خرج للتوصيل' && remainingAmount > 0) {
+    const payChoice = await Swal.fire({
+      title: 'تسديد المبلغ المتبقي؟',
+      html: `يوجد مبلغ متبقي على الفاتورة: <b>${fmt(remainingAmount)} جنيه</b><br>هل تريد تسديد المبلغ الآن أم التحصيل بعد التسليم؟`,
+      icon: 'question',
+      showCancelButton: true,
+      showDenyButton: true,
+      confirmButtonText: '💵 تسديد الآن',
+      denyButtonText: '🛵 تحصيل بعد التسليم',
+      cancelButtonText: 'إلغاء',
+      confirmButtonColor: '#10B981',
+      denyButtonColor: '#F59E0B',
+      cancelButtonColor: '#6B7280'
+    });
+
+    if (payChoice.isDismissed) return; // ألغى العملية
+
+    if (payChoice.isConfirmed) {
+      // تسديد الآن
+      const { value: safeType } = await Swal.fire({
+        title: `تسديد الباقي (${fmt(remainingAmount)} جنيه)`,
+        text: 'اختر طريقة / خزينة الاستلام:',
+        input: 'select',
+        inputOptions: {
+          'الخزينة': '💵 الخزنة النقدية (كاش)',
+          'فودافون كاش': '📱 فودافون كاش',
+          'إنستا باي': '⚡ إنستا باي'
+        },
+        inputValue: 'الخزينة',
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد التسديد',
+        cancelButtonText: 'إلغاء'
+      });
+      if (!safeType) return;
+      const payRes = await window.db.payInvoiceRemaining(id, remainingAmount, safeType);
+      if (!payRes.success) {
+        showToast('خطأ في تسديد المبلغ: ' + payRes.error, 'error');
+        return;
+      }
+    }
+  }
+
+  // 2) في حالة "تم التسليم": تسديد الباقي فوراً عند الاستلام
   if (newStatus === 'تم التسليم' && remainingAmount > 0) {
     const { value: safeType } = await Swal.fire({
       title: `تسديد الباقي (${fmt(remainingAmount)} جنيه)`,
-      text: 'يوجد مبلغ متبقي على هذه الفاتورة، اختر خزنة الاستلام:',
+      text: 'يوجد مبلغ متبقي على الفاتورة، اختر خزينة الاستلام لتسديده:',
       input: 'select',
       inputOptions: {
-        'الخزينة': '💵 الخزنة النقدية',
-        'فودافون كاش': '📱 فودافون كاش'
+        'الخزينة': '💵 الخزنة النقدية (كاش)',
+        'فودافون كاش': '📱 فودافون كاش',
+        'إنستا باي': '⚡ إنستا باي'
       },
       inputValue: 'الخزينة',
       showCancelButton: true,
-      confirmButtonText: 'تسديد وتسليم',
+      confirmButtonText: 'تسديد وتسليم ✅',
       cancelButtonText: 'إلغاء'
     });
     if (!safeType) return; // ألغى
@@ -191,43 +264,80 @@ async function changeInvoiceStatus(id, currentStatus, remainingAmount) {
       showToast('خطأ في تسديد المبلغ: ' + payRes.error, 'error');
       return;
     }
-    
-    // غيّر الحالة
-    const res = await window.db.updateInvoiceStatus(id, newStatus);
-    if (!res.success) {
-      showToast('حدث خطأ: ' + res.error, 'error');
-      return;
-    }
-
-    showToast('تم التسديد والتسليم بنجاح 💰✅', 'success');
-    loadSalesReport();
-
-    // رسالة مدمجة
-    const invRes = await window.db.queryOne(
-      `SELECT i.invoice_number, i.amount_paid, c.name as customer_name, c.phone as customer_phone
-       FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`,
-      [id]
-    );
-    if (invRes.success && invRes.data && invRes.data.customer_phone && invRes.data.customer_phone.trim() !== '' && invRes.data.customer_phone !== 'null') {
-      const inv = invRes.data;
-      const waStatus = await window.whatsapp.getStatus();
-      if (waStatus.ready) {
-        const waRes = await window.whatsapp.sendDelivered({
-          phone: inv.customer_phone,
-          customerName: inv.customer_name || 'عميلنا العزيز',
-          invoiceNumber: inv.invoice_number,
-        });
-        if (!waRes.success) {
-          showToast('فشل إرسال واتساب: ' + waRes.error, 'warning');
-          console.error('[WhatsApp]', waRes.error);
-        }
-      }
-    }
-    return; // خروج لعدم إرسال رسائل أخرى
   }
 
-  // الحالات العادية أو تم التسليم بدون باقي
-  const res = await window.db.updateInvoiceStatus(id, newStatus);
+  // 3) في حالة خرج للتوصيل، تأكد من وجود طيار
+  let driverIdToUpdate = null;
+  if (newStatus === 'خرج للتوصيل') {
+    const invRow = await window.db.query('SELECT driver_id FROM invoices WHERE id=?', [id]);
+    if (!invRow?.data?.[0]?.driver_id) {
+      const driversRes = await window.db.query("SELECT id, name FROM employees WHERE is_active=1 AND (employee_type='مندوب توصيل' OR job_title LIKE '%دليفر%' OR job_title LIKE '%طيار%') ORDER BY name");
+      let driverOptions = {};
+      if (driversRes.success && driversRes.data) {
+        driversRes.data.forEach(d => { driverOptions[d.id] = d.name; });
+      }
+      if (Object.keys(driverOptions).length === 0) {
+        // Fallback to all employees if no delivery driver defined
+        const allEmpRes = await window.db.query("SELECT id, name FROM employees WHERE is_active=1 ORDER BY name");
+        if (allEmpRes.success && allEmpRes.data) {
+          allEmpRes.data.forEach(d => { driverOptions[d.id] = d.name; });
+        }
+      }
+
+      const { value: selectedDriver } = await Swal.fire({
+        title: 'الرجاء اختيار الطيار (مندوب التوصيل)',
+        input: 'select',
+        inputOptions: driverOptions,
+        inputPlaceholder: 'اختر الطيار...',
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد',
+        cancelButtonText: 'إلغاء'
+      });
+      if (!selectedDriver) return;
+      driverIdToUpdate = parseInt(selectedDriver);
+    }
+  }
+
+  // 1) في حالة "في انتظار الاستلام": طلب عدد الأكياس وتوليد الباركودات
+  if (newStatus === 'في انتظار الاستلام') {
+    const invRow = await window.db.queryOne('SELECT invoice_number, bag_count FROM invoices WHERE id=?', [id]);
+    const currentBags = invRow?.data?.bag_count || 1;
+    const { value: bagsInput } = await Swal.fire({
+      title: '🛍️ تجهيز أكياس الطلب',
+      text: 'كم عدد الأكياس التي تم تعبئة وتغليف الطلب بها؟ (سيتم إرسالها للطباعة على طابعة الأكياس)',
+      input: 'number',
+      inputAttributes: { min: 1, step: 1 },
+      inputValue: currentBags > 0 ? currentBags : 1,
+      showCancelButton: true,
+      confirmButtonText: 'حفظ وتأكيد الأكياس ✅',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!bagsInput || parseInt(bagsInput, 10) < 1) return;
+    const count = parseInt(bagsInput, 10);
+    const bagRes = await window.db.setBagCount(id, count);
+    if (!bagRes.success) {
+      showToast('خطأ في تسجيل الأكياس: ' + bagRes.error, 'error');
+      return;
+    }
+  }
+
+  // 2) في حالة "خرج للتوصيل": فحص ومطابقة جميع الأكياس قبل الخروج
+  if (newStatus === 'خرج للتوصيل') {
+    const invRow = await window.db.queryOne('SELECT invoice_number FROM invoices WHERE id=?', [id]);
+    const invNum = invRow?.data?.invoice_number || `فاتورة #${id}`;
+    const verified = await verifyAllBagsScanned(id, invNum, 'خروج الطلب للتوصيل مع الطيار');
+    if (!verified) return;
+  }
+
+  // 3) في حالة "تم التسليم" لفاتورة استلام من المحل (غير دليفري): فحص الأكياس قبل التسليم
+  if (newStatus === 'تم التسليم' && !isDelivery) {
+    const invRow = await window.db.queryOne('SELECT invoice_number FROM invoices WHERE id=?', [id]);
+    const invNum = invRow?.data?.invoice_number || `فاتورة #${id}`;
+    const verified = await verifyAllBagsScanned(id, invNum, 'تسليم الطلب للعميل في المحل');
+    if (!verified) return;
+  }
+
+  const res = await window.db.updateInvoiceStatus(id, newStatus, driverIdToUpdate);
   if (!res.success) {
     showToast('حدث خطأ: ' + res.error, 'error');
     return;
@@ -235,14 +345,23 @@ async function changeInvoiceStatus(id, currentStatus, remainingAmount) {
 
   showToast('تم تغيير الحالة بنجاح ✅', 'success');
 
-  // إرسال واتساب حسب الحالة المختارة
-  if (newStatus === 'في انتظار الاستلام') {
-    await sendReadyWhatsApp(id);
-  } else if (newStatus === 'تم التسليم') {
-    await sendDeliveredWhatsApp(id);
-  }
+  // تحديث جدول المبيعات فوراً دون انتظار أي مهام لاحقة
+  await loadSalesReport();
 
-  loadSalesReport();
+  // إرسال واتساب بشكل غير متزامن في الخلفية لعدم تعطيل الواجهة
+  (async () => {
+    try {
+      if (newStatus === 'في انتظار الاستلام') {
+        await sendReadyWhatsApp(id);
+      } else if (newStatus === 'تم التسليم') {
+        await sendDeliveredWhatsApp(id);
+      } else if (newStatus === 'خرج للتوصيل') {
+        await sendOutForDeliveryWhatsApp(id);
+      }
+    } catch (waErr) {
+      console.warn('[WhatsApp Error]', waErr);
+    }
+  })();
 }
 
 async function reversePaymentPrompt(invoiceId, amountPaid) {
@@ -319,6 +438,32 @@ async function sendDeliveredWhatsApp(invoiceId) {
   }
 }
 
+// رسالة "خرج للتوصيل"
+async function sendOutForDeliveryWhatsApp(invoiceId) {
+  const invRes = await window.db.query(
+    `SELECT i.invoice_number, c.name as customer_name, c.phone as customer_phone, d.name as driver_name
+     FROM invoices i 
+     LEFT JOIN customers c ON i.customer_id = c.id 
+     LEFT JOIN employees d ON i.driver_id = d.id 
+     WHERE i.id = ?`,
+    [invoiceId]
+  );
+  if (!invRes.success || !invRes.data || invRes.data.length === 0) return;
+  const inv = invRes.data[0];
+  if (!inv.customer_phone || inv.customer_phone.trim() === '' || inv.customer_phone === 'null') return;
+  const waStatus = await window.whatsapp.getStatus();
+  if (!waStatus.ready) return;
+  const res = await window.whatsapp.sendOutForDelivery({
+    phone: inv.customer_phone,
+    customerName: inv.customer_name,
+    invoiceNumber: inv.invoice_number,
+    driverName: inv.driver_name || 'مندوب التوصيل'
+  });
+  if (!res.success) {
+    showToast('فشل إرسال رسالة الواتساب: ' + res.error, 'warning');
+  }
+}
+
 async function payInvoiceDebt(id, maxAmount) {
   const { value: formValues } = await Swal.fire({
     title: 'سداد مديونية الفاتورة',
@@ -332,6 +477,7 @@ async function payInvoiceDebt(id, maxAmount) {
         <select id="swal-safe" class="swal2-select" style="display: flex; margin: 10px 0; width: 90%;">
           <option value="الخزينة">💵 الخزنة النقدية</option>
           <option value="فودافون كاش">📱 فودافون كاش</option>
+          <option value="إنستا باي">⚡ إنستا باي</option>
         </select>
       </div>
     `,
@@ -562,14 +708,17 @@ async function truncateInvoices() {
     cancelButtonText: 'إلغاء'
   });
   if (text !== 'تأكيد') {
-    showToast('تم إلغاء العملية','info'); return;
+    showToast('تم إلغاء العملية', 'info');
+    return;
   }
-  await window.db.run('DELETE FROM invoice_items',[]);
-  await window.db.run('DELETE FROM return_items',[]);
-  await window.db.run('DELETE FROM returns',[]);
-  await window.db.run('DELETE FROM invoices',[]);
-  await window.db.run('UPDATE invoice_sequence SET last_number=0',[]);
-  showToast('تم حذف الفواتير وتصفير العداد','success');
+
+  const res = await window.db.truncateInvoices();
+  if (res.success) {
+    showToast('تم حذف جميع الفواتير وتصفير العداد بنجاح', 'success');
+    await loadSalesReport();
+  } else {
+    Swal.fire('خطأ', 'فشل حذف الفواتير: ' + (res.error || 'خطأ غير معروف'), 'error');
+  }
 }
 
 async function truncateFinance() {
@@ -584,15 +733,17 @@ async function truncateFinance() {
     cancelButtonText: 'إلغاء'
   });
   if (text !== 'تأكيد') {
-    showToast('تم إلغاء العملية','info'); return;
+    showToast('تم إلغاء العملية', 'info');
+    return;
   }
-  await window.db.run('DELETE FROM expenses',[]);
-  await window.db.run('DELETE FROM revenues',[]);
-  await window.db.run('DELETE FROM treasury',[]);
-  await window.db.run('DELETE FROM salary_payments',[]);
-  // add default treasury back
-  await window.db.run(`INSERT INTO treasury (type, description, amount, balance_after, treasury_type) VALUES ('إيراد', 'رصيد افتتاحي', 0, 0, 'الخزينة')`,[]);
-  showToast('تم مسح سجلات الخزينة والمصروفات','success');
+
+  const res = await window.db.truncateFinance();
+  if (res.success) {
+    showToast('تم مسح سجلات الخزينة والمصروفات بنجاح', 'success');
+    if (typeof loadIncomeStatement === 'function') await loadIncomeStatement();
+  } else {
+    Swal.fire('خطأ', 'فشل مسح المالية: ' + (res.error || 'خطأ غير معروف'), 'error');
+  }
 }
 
 async function reprintPastInvoice(inv) {
@@ -626,16 +777,30 @@ async function reprintPastInvoice(inv) {
     const addressHTML = settings.address ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
     const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
     
-    const tailorHTML = (settings.show_tailor_name && inv.emp_name) ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخياط:</span><span style="font-weight:700;">${inv.emp_name}</span></div>` : '';
     const custNameHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">العميل:</span><span style="font-weight:700;">${inv.customer_name || 'عميل نقدي'}</span></div>`;
     
     let custPhone = '';
+    let custAddr = '';
     if (inv.customer_id) {
-       const custRes = await window.db.queryOne('SELECT phone FROM customers WHERE id=?', [inv.customer_id]);
+       const custRes = await window.db.queryOne('SELECT phone, address FROM customers WHERE id=?', [inv.customer_id]);
        custPhone = custRes.data?.phone || '';
+       custAddr = custRes.data?.address || '';
     }
     const custPhoneHTML = custPhone ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">ت.العميل:</span><span style="font-weight:700;">${custPhone}</span></div>` : '';
+    const custAddrHTML = (custAddr && (inv.is_delivery || Number(settings.show_customer_address) === 1)) ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">العنوان:</span><span style="font-weight:700;">${custAddr}</span></div>` : '';
+    const deliveryBadgeHTML = inv.is_delivery ? `<div style="text-align:center;background:#fff;color:#000;border:1.5px solid #000;border-radius:4px;padding:2px 14px;font-size:13px;font-weight:900;margin:4px auto;width:fit-content;letter-spacing:0.5px;">Delivery 🛵</div>` : '';
+    const expressBadgeHTML = inv.is_express ? `<div style="text-align:center;background:#fff;color:#000;border:1.5px solid #000;border-radius:4px;padding:2px 14px;font-size:13px;font-weight:900;margin:4px auto;width:fit-content;letter-spacing:0.5px;">Express ⚡</div>` : '';
     
+    // الطيار
+    let driverHTML = '';
+    if (inv.is_delivery && inv.driver_id) {
+      const dRes = await window.db.queryOne('SELECT name FROM employees WHERE id=?', [inv.driver_id]);
+      const driverName = dRes?.data?.name || '';
+      if (driverName) {
+        driverHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الطيار:</span><span style="font-weight:700;">${driverName}</span></div>`;
+      }
+    }
+
     const notesStr = inv.notes || '';
     const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:12px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
     const settingsNotesHTML = settings.receipt_notes ? `<div style="text-align:center;font-size:12px;margin-top:4px;font-weight:700;">${settings.receipt_notes}</div>` : '';
@@ -656,8 +821,9 @@ async function reprintPastInvoice(inv) {
         print-color-adjust:exact;
       ">
         ${logoHTML}
-        <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'EL-Tarzy'}</div>
-        <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
+        <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'Dry Clean'}</div>
+        ${deliveryBadgeHTML}
+        ${expressBadgeHTML}
         ${addressHTML}
         ${phoneHTML}
         <div style="border-top:2px dashed #000;margin:6px 0;"></div>
@@ -665,7 +831,8 @@ async function reprintPastInvoice(inv) {
         <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">التاريخ:</span><span style="font-weight:700;">${date}</span></div>
         ${custNameHTML}
         ${custPhoneHTML}
-        ${tailorHTML}
+        ${custAddrHTML}
+        ${driverHTML}
         <div style="border-top:2px dashed #000;margin:6px 0;"></div>
         <table style="width:100%;border-collapse:collapse;font-size:13px;font-weight:700;table-layout:fixed;">
           <colgroup>
@@ -734,20 +901,23 @@ async function factoryReset() {
     cancelButtonText: 'إلغاء'
   });
   if (text !== 'مسح النظام بالكامل') {
-    showToast('تم إلغاء العملية','info'); return;
+    showToast('تم إلغاء العملية', 'info');
+    return;
   }
-  
-  const tables = ['invoice_items','invoices','return_items','returns','attendance','leaves','advances',
-    'deductions','incentives','salary_payments','custody','shifts','expenses','revenues','treasury',
-    'purchase_items','purchases','customers','suppliers','partners','employees','services'];
-    
-  for(let t of tables) await window.db.run(`DELETE FROM ${t}`,[]);
-  
-  await window.db.run('UPDATE invoice_sequence SET last_number=0',[]);
-  await window.db.run(`INSERT INTO treasury (type, description, amount, balance_after, treasury_type) VALUES ('إيراد', 'رصيد افتتاحي', 0, 0, 'الخزينة')`,[]);
-  
-  showToast('تم ضبط المصنع بنجاح','success');
-  setTimeout(()=>goBack(), 2000);
+
+  const res = await window.db.selectiveReset({
+    keepCustomers: false,
+    keepServices: false,
+    keepEmployees: false,
+    keepSettings: true
+  });
+
+  if (res.success) {
+    await Swal.fire('تم بنجاح', 'تمت استعادة ضبط المصنع ومسح كافة البيانات.', 'success');
+    window.electron.restart();
+  } else {
+    Swal.fire('خطأ', 'فشل ضبط المصنع: ' + (res.error || 'خطأ غير معروف'), 'error');
+  }
 }
 
 // ─── Role Check & Quit ────────────────────────────────────────────────────────
@@ -778,6 +948,5 @@ window.electron.onConfirmBackupBeforeQuit(() => {
 
 // Init first tab
 applyRoleVisibility();
-loadTailorsDropdown().then(() => {
-  loadSalesReport();
-});
+loadSalesReport();
+startSalesAutoRefresh();

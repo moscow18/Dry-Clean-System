@@ -133,6 +133,7 @@ build/
 temp/
 tmp/
 scratch/
+SKILL*.md
 *.tmp
 *.bak
 *.swp

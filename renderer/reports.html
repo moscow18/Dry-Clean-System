@@ -1,8 +1,8 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — التقارير</title>
+  <title>DRY CLEAN — الفواتير</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -123,7 +123,7 @@
   <!-- Header -->
   <header class="app-header" style="flex-shrink:0;">
     <div>
-      <div class="header-title">التقارير الشاملة</div>
+      <div class="header-title">الفواتيرالشاملة</div>
       <div class="header-subtitle">تقارير المبيعات، الأرباح، والمشتريات</div>
     </div>
     <div class="header-actions">
@@ -167,14 +167,9 @@
             <option value="">الكل</option>
             <option value="تحت الشغل">تحت الشغل</option>
             <option value="في انتظار الاستلام">في انتظار الاستلام</option>
+            <option value="خرج للتوصيل">خرج للتوصيل</option>
             <option value="تم التسليم">تم التسليم</option>
             <option value="غير مسددة">غير مسددة (مديونية)</option>
-          </select>
-        </div>
-        <div class="form-group" style="width:140px;">
-          <label class="form-label">الخياط</label>
-          <select id="salesTailorFilter" class="form-control" onchange="loadSalesReport()">
-            <option value="">الكل</option>
           </select>
         </div>
         <button class="btn btn-primary" onclick="loadSalesReport()">تحديث التقرير</button>
@@ -194,6 +189,10 @@
           <div class="summary-val" id="salesDelivered">0</div>
           <div class="summary-lbl">فواتير مسلمة</div>
         </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #0d9488, #0f766e);">
+          <div class="summary-val" id="salesOutForDelivery">0</div>
+          <div class="summary-lbl">خرج للتوصيل 🚚</div>
+        </div>
         <div class="summary-card" style="background: linear-gradient(135deg, #1f2937, #374151);">
           <div class="summary-val" id="salesInProgress">0</div>
           <div class="summary-lbl">تحت الشغل</div>
@@ -204,7 +203,7 @@
         </div>
         <div class="summary-card danger">
           <div class="summary-val" id="salesUnpaidAmount">0.00</div>
-          <div class="summary-lbl">مديونيات الفواتير</div>
+          <div class="summary-lbl">إجمالي المتبقي (آجل)</div>
         </div>
       </div>
 
@@ -216,9 +215,10 @@
                 <th>رقم الفاتورة</th>
                 <th>التاريخ</th>
                 <th>العميل</th>
-                <th>الخياط</th>
+                <th>الطيار</th>
                 <th>الكاشير</th>
                 <th>الحالة</th>
+                <th>الأكياس 🛍️</th>
                 <th>نوع الدفع</th>
                 <th>الإجمالي</th>
                 <th>الخصم</th>
@@ -229,7 +229,7 @@
               </tr>
             </thead>
             <tbody id="salesTableBody">
-              <tr><td colspan="10" class="table-empty">جاري التحميل...</td></tr>
+              <tr><td colspan="14" class="table-empty">جاري التحميل...</td></tr>
             </tbody>
           </table>
         </div>

@@ -2,7 +2,7 @@ let currentLogoPath = null;
 
 
 function showSection(name) {
-  ['store', 'cashier', 'users', 'backup', 'whatsapp', 'wa-templates'].forEach(s => {
+  ['store', 'cashier', 'users', 'backup', 'whatsapp', 'wa-templates', 'printers'].forEach(s => {
     document.getElementById(`section-${s}`).style.display = s === name ? '' : 'none';
   });
   document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
@@ -23,6 +23,7 @@ function showSection(name) {
   if (name === 'backup')       { loadBackups(); loadExternalBackupPath(); }
   if (name === 'whatsapp')     { checkWaStatus(); loadWaProviderSettings(); }
   if (name === 'wa-templates') loadWaTemplates();
+  if (name === 'printers')     loadPrinterSettings();
 }
 
 // ─── Admin check ──────────────────────────────────────────────────────────────
@@ -49,8 +50,9 @@ async function loadSettings() {
   document.getElementById('currency').value               = s.currency || 'جنيه';
   document.getElementById('receiptNotes').value           = s.receipt_notes || '';
   document.getElementById('receiptFooter').value          = s.receipt_footer || '';
-  document.getElementById('showTailorName').checked       = Number(s.show_tailor_name) === 1;
   document.getElementById('showCustomerPhone').checked    = Number(s.show_customer_phone) === 1;
+  if (document.getElementById('showCustomerAddress'))
+    document.getElementById('showCustomerAddress').checked = Number(s.show_customer_address) === 1;
   document.getElementById('preventCashierPriceEdit').checked = Number(s.prevent_cashier_price_edit) === 1;
   if (document.getElementById('adminWaPhone')) document.getElementById('adminWaPhone').value = s.admin_wa_phone || '';
   if (document.getElementById('reportSavePath')) document.getElementById('reportSavePath').value = s.report_save_path || '';
@@ -70,7 +72,7 @@ async function loadSettings() {
   if (document.getElementById('waPhone2')) document.getElementById('waPhone2').value = s.wa_phone2 || '';
 
   // Update sidebar shop name
-  document.getElementById('sidebarShopName').textContent  = s.company_name || 'EL-TARZY';
+  document.getElementById('sidebarShopName').textContent  = s.company_name || 'DRY CLEAN';
 
   currentLogoPath = s.logo_path;
   if (s.logo_path) {
@@ -88,14 +90,16 @@ async function loadWaTemplates() {
   const s = res.data;
   
   // Default values if empty
-  const d_inv = `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالفني المنفذ: {tailorName}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع للتصاليح: 48 ساعة من تاريخ الفاتورة\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
+  const d_inv = `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع: 48 ساعة من تاريخ الفاتورة\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
   const d_rdy = `أهلاً {customerName} 🤍\n\nشغلك جاهز عندنا في {shopName} ✂️\nتم تجهيز طلبك بفاتورة رقم {invoiceNumber} وفي انتظار استلامك في أقرب فرصة.\nنتمنى نكون عند حسن ظنك 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
+  const d_out = `أهلاً {customerName} 🤍\n\nطلبك خرج للتوصيل الآن من {shopName} 🛵\nفاتورة رقم {invoiceNumber}\nالطيار: {driverName}\n\nنتمنى لك يوماً سعيداً 🤍\n{shopName}\n📞 {contactPhone}`;
   const d_del = `أهلاً {customerName} 🤍\n\nشكراً لاستلامك طلبك من {shopName} ✂️\nفاتورة رقم {invoiceNumber} — تم التسليم بنجاح ✅\n\nنتشرف بخدمتك دايماً وفي انتظار إطلالتك القادمة 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`;
   const d_full= `أهلاً {customerName} 🤍\n\nتم استلام دفعتك، وفاتورتك رقم {invoiceNumber} مسددة بالكامل ✅\n💵 المبلغ المدفوع: {paid} جنيه\n\nشكرًا لثقتك في {shopName} 🤍 نتشرف بزيارتك دايمًا\n📞 {contactPhone}`;
   const d_part= `أهلاً {customerName} 🤍\n\nتم استلام دفعتك بنجاح في {shopName} ✂️\n🧾 فاتورة رقم {invoiceNumber}\n💵 المبلغ المدفوع الآن: {paidNow} جنيه\n📊 إجمالي المدفوع لحد دلوقتي: {totalPaid} جنيه\n📌 الباقي: {remaining} جنيه\n\nشكرًا لثقتك في {shopName} 🤍\n📞 {contactPhone}`;
 
   if(document.getElementById('tplInvoiceConfirm')) document.getElementById('tplInvoiceConfirm').value = s.wa_tpl_invoice_confirm || d_inv;
   if(document.getElementById('tplOrderReady')) document.getElementById('tplOrderReady').value = s.wa_tpl_order_ready || d_rdy;
+  if(document.getElementById('tplOutForDelivery')) document.getElementById('tplOutForDelivery').value = s.wa_tpl_out_for_delivery || d_out;
   if(document.getElementById('tplDelivered')) document.getElementById('tplDelivered').value = s.wa_tpl_delivered || d_del;
   if(document.getElementById('tplFullPayment')) document.getElementById('tplFullPayment').value = s.wa_tpl_full_payment || d_full;
   if(document.getElementById('tplPartialPayment')) document.getElementById('tplPartialPayment').value = s.wa_tpl_partial_payment || d_part;
@@ -116,19 +120,26 @@ async function saveCashierPermissions() {
       tax_number:                s.tax_number || '',
       receipt_footer:            s.receipt_footer || '',
       receipt_notes:             s.receipt_notes || '',
-      show_tailor_name:          s.show_tailor_name !== 0,
+      show_tailor_name:          0,
       show_customer_phone:       s.show_customer_phone !== 0,
+      show_customer_address:     Number(s.show_customer_address) === 1,
       currency:                  s.currency || 'جنيه',
       wa_phone1:                 s.wa_phone1 || '',
       wa_phone2:                 s.wa_phone2 || '',
       wa_tpl_invoice_confirm:    s.wa_tpl_invoice_confirm || '',
       wa_tpl_order_ready:        s.wa_tpl_order_ready || '',
+      wa_tpl_out_for_delivery:   s.wa_tpl_out_for_delivery || '',
       wa_tpl_delivered:          s.wa_tpl_delivered || '',
       wa_tpl_full_payment:       s.wa_tpl_full_payment || '',
       wa_tpl_partial_payment:    s.wa_tpl_partial_payment || '',
       admin_wa_phone:            s.admin_wa_phone || '',
       report_save_path:          s.report_save_path || '',
       day_cutoff_hour:           s.day_cutoff_hour || 0,
+      // Printer settings — pass through
+      invoice_printer:           s.invoice_printer || '',
+      label_printer:             s.label_printer || '',
+      label_width:               parseInt(s.label_width || 38, 10),
+      label_height:              parseInt(s.label_height || 35, 10),
       // Permissions — read from checkboxes
       prevent_cashier_price_edit: document.getElementById('preventCashierPriceEdit').checked,
       cashier_hide_reports:       document.getElementById('cashierHideReports').checked,
@@ -149,6 +160,10 @@ async function saveCashierPermissions() {
 
 // ─── Save settings ────────────────────────────────────────────────────────────
 async function saveSettings() {
+  // Fetch current settings to preserve printer fields
+  const curRes = await window.db.getSettings();
+  const cur = (curRes.success && curRes.data) ? curRes.data : {};
+
   const data = {
     company_name:              document.getElementById('companyName').value.trim(),
     address:                   document.getElementById('address').value.trim(),
@@ -157,8 +172,9 @@ async function saveSettings() {
     tax_number:                document.getElementById('taxNumber').value.trim(),
     receipt_footer:            document.getElementById('receiptFooter').value.trim(),
     receipt_notes:             document.getElementById('receiptNotes').value.trim(),
-    show_tailor_name:          document.getElementById('showTailorName').checked,
+    show_tailor_name:          false,
     show_customer_phone:       document.getElementById('showCustomerPhone').checked,
+    show_customer_address:     document.getElementById('showCustomerAddress')?.checked || false,
     prevent_cashier_price_edit:document.getElementById('preventCashierPriceEdit').checked,
     currency:                  document.getElementById('currency').value.trim() || 'جنيه',
     // Cashier permissions
@@ -171,15 +187,22 @@ async function saveSettings() {
     // WhatsApp
     wa_phone1:                 document.getElementById('waPhone1')?.value.trim() || '',
     wa_phone2:                 document.getElementById('waPhone2')?.value.trim() || '',
-    // Templates (saved separately via saveWaTemplates)
+    // Templates
     wa_tpl_invoice_confirm:    document.getElementById('tplInvoiceConfirm')?.value.trim() || '',
     wa_tpl_order_ready:        document.getElementById('tplOrderReady')?.value.trim() || '',
+    wa_tpl_out_for_delivery:   document.getElementById('tplOutForDelivery')?.value.trim() || '',
     wa_tpl_delivered:          document.getElementById('tplDelivered')?.value.trim() || '',
     wa_tpl_full_payment:       document.getElementById('tplFullPayment')?.value.trim() || '',
     wa_tpl_partial_payment:    document.getElementById('tplPartialPayment')?.value.trim() || '',
     admin_wa_phone:            document.getElementById('adminWaPhone')?.value.trim() || '',
     report_save_path:          document.getElementById('reportSavePath')?.value.trim() || '',
     day_cutoff_hour:           parseInt(document.getElementById('dayCutoffHour')?.value || '0', 10),
+    // Printer settings — preserve ALL existing printer fields (never wipe them from general-settings save)
+    invoice_printer:           cur.invoice_printer || '',
+    label_printer:             cur.label_printer  || '',
+    bag_printer:               cur.bag_printer    || '',
+    label_width:               parseInt(cur.label_width  || 38, 10),
+    label_height:              parseInt(cur.label_height || 35, 10),
   };
 
   const res = await window.db.updateSettings(data);
@@ -1030,5 +1053,367 @@ async function executeSelectiveReset() {
     window.electron.restart();
   } else {
     Swal.fire('خطأ', 'حدث خطأ أثناء المسح: ' + res.error, 'error');
+  }
+}
+
+// ─── Printer Settings ───────────────────────────────────────────────────────────────────────
+let _cachedPrinters = [];
+
+/**
+ * Rebuild the three printer <select> elements from the live system printer list.
+ * @param {Object} [forcedValues]  If provided, use these values instead of reading the DOM.
+ *   { invoice, label, bag }  — pass when calling from loadPrinterSettings so we always restore
+ *   the DB-saved selection even if the dropdown was previously empty.
+ */
+async function refreshPrinterLists(forcedValues) {
+  let printers = [];
+  try {
+    printers = await window.electron.getPrinters();
+  } catch (e) {
+    console.warn('[Printers] getPrinters error:', e);
+  }
+  _cachedPrinters = printers || [];
+
+  const invSel = document.getElementById('invoicePrinterSelect');
+  const lblSel = document.getElementById('labelPrinterSelect');
+  const bagSel = document.getElementById('bagPrinterSelect');
+  if (!invSel || !lblSel) return;
+
+  // Determine which value to restore: prefer forcedValues (from DB), fall back to current DOM value
+  const wantInv = (forcedValues && forcedValues.invoice != null) ? forcedValues.invoice : invSel.value;
+  const wantLbl = (forcedValues && forcedValues.label   != null) ? forcedValues.label   : lblSel.value;
+  const wantBag = (forcedValues && forcedValues.bag     != null) ? forcedValues.bag     : (bagSel?.value || '');
+
+  invSel.innerHTML = '<option value="">— الطابعة الافتراضية للنظام —</option>';
+  lblSel.innerHTML = '<option value="">— لا تطبع ليبل —</option>';
+  if (bagSel) bagSel.innerHTML = '<option value="">— لا تطبع ملصق أكياس —</option>';
+
+  _cachedPrinters.forEach(p => {
+    const opt = `<option value="${p.name}">${p.name}${p.isDefault ? ' ✓' : ''}</option>`;
+    invSel.innerHTML += opt;
+    lblSel.innerHTML += opt;
+    if (bagSel) bagSel.innerHTML += opt;
+  });
+
+  // Restore — if the saved printer isn't in the list (e.g. offline), append it as a visible option
+  // so the user sees what was saved and it stays selected.
+  function restoreSelect(sel, value) {
+    if (!sel || !value) return;
+    if (!Array.from(sel.options).some(o => o.value === value)) {
+      // Printer not in current list — add it so it can be selected
+      sel.innerHTML += `<option value="${value}">${value} (غير متصلة)</option>`;
+    }
+    sel.value = value;
+  }
+
+  restoreSelect(invSel, wantInv);
+  restoreSelect(lblSel, wantLbl);
+  if (bagSel) restoreSelect(bagSel, wantBag);
+}
+
+function updateLiveLabelPreview() {
+  const w = parseInt(document.getElementById('labelWidthInput')?.value || 38, 10);
+  const h = parseInt(document.getElementById('labelHeightInput')?.value || 35, 10);
+
+  const sticker = document.getElementById('liveLabelSticker');
+  const badge = document.getElementById('liveLabelDimensionsBadge');
+
+  if (sticker) {
+    // Scale for preview display: 1mm ≈ 3.5px on screen
+    const previewWidth = Math.max(100, Math.min(260, Math.round(w * 3.5)));
+    const previewHeight = Math.max(80, Math.min(220, Math.round(h * 3.2)));
+    sticker.style.width = previewWidth + 'px';
+    sticker.style.minHeight = previewHeight + 'px';
+  }
+
+  if (badge) {
+    badge.textContent = `${w} مم × ${h} مم`;
+  }
+}
+
+function setLabelPreset(w, h) {
+  if (w !== null) {
+    const widthInput = document.getElementById('labelWidthInput');
+    if (widthInput) widthInput.value = w;
+  }
+  if (h !== null) {
+    const heightInput = document.getElementById('labelHeightInput');
+    if (heightInput) heightInput.value = h;
+  }
+  updateLiveLabelPreview();
+}
+
+async function loadLocalNetworkIp() {
+  const ipInput = document.getElementById('localNetworkIpInput');
+  const urlInput = document.getElementById('localNetworkUrlInput');
+  const allIpsContainer = document.getElementById('allNetworkIpsContainer');
+  const allIpsList = document.getElementById('allNetworkIpsList');
+  if (!ipInput) return;
+
+  try {
+    let details = null;
+    if (window.electron && typeof window.electron.getNetworkDetails === 'function') {
+      details = await window.electron.getNetworkDetails();
+    }
+
+    if (details && details.primaryIp) {
+      ipInput.value = details.primaryIp;
+      if (urlInput) urlInput.value = details.serverUrl || `http://${details.primaryIp}:${details.port || 3141}`;
+
+      if (details.allIps && details.allIps.length > 1 && allIpsContainer && allIpsList) {
+        allIpsContainer.style.display = 'block';
+        allIpsList.innerHTML = details.allIps.map(i => `<span style="background:#fff;padding:2px 8px;border-radius:4px;margin-right:6px;font-family:monospace;font-weight:700;">${i.address} (${i.name})</span>`).join(' ');
+      }
+      return;
+    }
+
+    // Fallback to getLocalIp
+    if (window.electron && typeof window.electron.getLocalIp === 'function') {
+      const ip = await window.electron.getLocalIp();
+      const finalIp = ip || '127.0.0.1';
+      ipInput.value = finalIp;
+      if (urlInput) urlInput.value = `http://${finalIp}:3141`;
+      return;
+    }
+  } catch (err) {
+    console.error('Error loading local network details:', err);
+  }
+
+  ipInput.value = '127.0.0.1';
+  if (urlInput) urlInput.value = 'http://127.0.0.1:3141';
+}
+
+function copyLocalNetworkIp() {
+  const input = document.getElementById('localNetworkIpInput');
+  const btn = document.getElementById('btnCopyLocalIp');
+  if (!input) return;
+  const ip = input.value;
+  if (!ip || ip.includes('...')) return;
+
+  navigator.clipboard.writeText(ip).then(() => {
+    if (btn) {
+      const origText = btn.innerHTML;
+      btn.innerHTML = '✅ تم النسخ!';
+      btn.style.borderColor = '#10B981';
+      btn.style.color = '#10B981';
+      setTimeout(() => {
+        btn.innerHTML = origText;
+        btn.style.borderColor = '';
+        btn.style.color = '';
+      }, 2000);
+    }
+  }).catch(() => {
+    input.select();
+    document.execCommand('copy');
+    if (btn) btn.innerHTML = '✅ تم النسخ!';
+  });
+}
+
+function copyLocalNetworkUrl() {
+  const input = document.getElementById('localNetworkUrlInput');
+  const btn = document.getElementById('btnCopyLocalUrl');
+  if (!input) return;
+  const url = input.value;
+  if (!url || url.includes('...')) return;
+
+  navigator.clipboard.writeText(url).then(() => {
+    if (btn) {
+      const origText = btn.innerHTML;
+      btn.innerHTML = '✅ تم نسخ الرابط!';
+      btn.style.background = '#10B981';
+      setTimeout(() => {
+        btn.innerHTML = origText;
+        btn.style.background = '';
+      }, 2000);
+    }
+  }).catch(() => {
+    input.select();
+    document.execCommand('copy');
+    if (btn) btn.innerHTML = '✅ تم النسخ!';
+  });
+}
+
+function openServerInBrowser() {
+  const urlInput = document.getElementById('localNetworkUrlInput');
+  const url = (urlInput && urlInput.value && !urlInput.value.includes('...')) ? urlInput.value : 'http://127.0.0.1:3141';
+  if (window.electron && typeof window.electron.openExternal === 'function') {
+    window.electron.openExternal(url);
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
+async function openFirewallPortBtn() {
+  const btn = document.getElementById('btnOpenFirewallPort');
+  const feedback = document.getElementById('firewallFeedback');
+  if (!feedback) return;
+
+  feedback.style.color = '#2563EB';
+  feedback.textContent = '⏳ جاري طلب إذن جدار الحماية (UAC)...';
+
+  try {
+    if (window.electron && typeof window.electron.openFirewallPort === 'function') {
+      const res = await window.electron.openFirewallPort();
+      if (res && res.success) {
+        feedback.style.color = '#10B981';
+        feedback.textContent = '✅ ' + (res.message || 'تم السماح بالمنفذ بنجاح!');
+        if (btn) btn.style.display = 'none';
+      } else {
+        feedback.style.color = '#EF4444';
+        feedback.textContent = '❌ ' + (res.error || 'تعذر السماح بالمنفذ');
+      }
+    } else {
+      feedback.style.color = '#EF4444';
+      feedback.textContent = 'يرجى تشغيل ملف (فتح_منفذ_الربط_في_جدار_الحماية.bat) كمسؤول يدوياً';
+    }
+  } catch (err) {
+    feedback.style.color = '#EF4444';
+    feedback.textContent = '❌ خطأ: ' + err.message;
+  }
+}
+
+async function loadPrinterSettings() {
+  // 1. Fetch saved printer values from DB first, so we can pass them to refreshPrinterLists.
+  //    This guarantees the saved printer is always restored, even if getPrinters returns [].
+  const settingsRes = await window.db.getSettings();
+  const s = (settingsRes.success && settingsRes.data) ? settingsRes.data : {};
+
+  await refreshPrinterLists({
+    invoice: s.invoice_printer || '',
+    label:   s.label_printer   || '',
+    bag:     s.bag_printer     || ''
+  });
+  await loadLocalNetworkIp();
+
+  // Restore label dimensions from the already-fetched settings
+  const lblWidth  = document.getElementById('labelWidthInput');
+  const lblHeight = document.getElementById('labelHeightInput');
+  if (lblWidth  && s.label_width  != null) lblWidth.value  = s.label_width;
+  if (lblHeight && s.label_height != null) lblHeight.value = s.label_height;
+
+  updateLiveLabelPreview();
+}
+
+async function savePrinterSettings() {
+  try {
+    const w = parseInt(document.getElementById('labelWidthInput')?.value, 10) || 38;
+    const h = parseInt(document.getElementById('labelHeightInput')?.value, 10) || 35;
+    const invP = document.getElementById('invoicePrinterSelect')?.value || '';
+    const lblP = document.getElementById('labelPrinterSelect')?.value || '';
+    const bagP = document.getElementById('bagPrinterSelect')?.value || '';
+
+    // 1. Direct SQLite execution (works instantly even without app restart)
+    try { await window.db.run("ALTER TABLE company_settings ADD COLUMN label_width INTEGER DEFAULT 38", []); } catch (_) {}
+    try { await window.db.run("ALTER TABLE company_settings ADD COLUMN label_height INTEGER DEFAULT 35", []); } catch (_) {}
+    try { await window.db.run("ALTER TABLE company_settings ADD COLUMN bag_printer TEXT DEFAULT ''", []); } catch (_) {}
+    await window.db.run(
+      "UPDATE company_settings SET label_width = ?, label_height = ?, invoice_printer = ?, label_printer = ?, bag_printer = ? WHERE id = 1",
+      [w, h, invP, lblP, bagP]
+    );
+
+    // 2. Also sync through updateSettings
+    const currentSettings = await window.db.getSettings();
+    if (currentSettings.success && currentSettings.data) {
+      const s = currentSettings.data;
+      s.label_width = w;
+      s.label_height = h;
+      s.invoice_printer = invP;
+      s.label_printer = lblP;
+      s.bag_printer = bagP;
+      await window.db.updateSettings(s);
+    }
+
+    // 3. Update preview
+    updateLiveLabelPreview();
+
+    // 4. Prominent SweetAlert confirmation
+    if (typeof Swal !== 'undefined') {
+      await Swal.fire({
+        icon: 'success',
+        title: 'تم حفظ إعدادات الطابعات بنجاح ✔',
+        html: `<div style="font-size:14px;color:#555;margin-top:8px;">الأبعاد: <b>${w} مم</b> × <b>${h} مم</b><br>طابعة الليبل: <b>${lblP || 'غير محددة'}</b><br>طابعة الأكياس: <b>${bagP || 'غير محددة'}</b></div>`,
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } else {
+      alert(`تم حفظ الإعدادات بنجاح: ${w} مم × ${h} مم`);
+    }
+  } catch (err) {
+    console.error('savePrinterSettings error:', err);
+    if (typeof Swal !== 'undefined') {
+      Swal.fire('خطأ في الحفظ', err.message, 'error');
+    } else {
+      alert('خطأ في الحفظ: ' + err.message);
+    }
+  }
+}
+
+async function testPrintLabel() {
+  const lblSel = document.getElementById('labelPrinterSelect');
+  const labelPrinter = lblSel?.value || '';
+  const w = parseInt(document.getElementById('labelWidthInput')?.value, 10) || 38;
+  const h = parseInt(document.getElementById('labelHeightInput')?.value, 10) || 35;
+
+  const printBox = document.getElementById('receiptPrint');
+  if (!printBox) return;
+
+  const numFontSize = h <= 25 ? 13 : (h <= 35 ? 15 : 18);
+  const garmentFontSize = h <= 25 ? 24 : (h <= 35 ? 30 : 38);
+  const botFontSize = h <= 25 ? 13 : (h <= 35 ? 15 : 17);
+  const svgW = h <= 25 ? 24 : (h <= 35 ? 28 : 34);
+  const svgH = h <= 25 ? 13 : (h <= 35 ? 15 : 18);
+
+  const testLabelHTML = `
+    <div style="
+      width: ${w}mm;
+      max-width: ${w}mm;
+      height: ${h}mm;
+      max-height: ${h}mm;
+      text-align: center;
+      margin: 0;
+      padding: 1px 2px;
+      font-family: Arial, Tahoma, sans-serif;
+      color: #000000;
+      box-sizing: border-box;
+      direction: ltr;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    ">
+      <div style="font-size:${numFontSize}px;font-weight:900;letter-spacing:0.5px;border-bottom:2px solid #000;padding-bottom:1px;text-align:center;line-height:1.1;">
+        INV-TEST-001
+      </div>
+      <div style="font-size:${garmentFontSize}px;font-weight:900;line-height:1;margin:1px 0;text-align:center;">
+        F
+      </div>
+      <div style="display:flex;justify-content:center;align-items:center;gap:6px;direction:rtl;line-height:1;">
+        <span style="font-size:${botFontSize}px;font-weight:900;">القطع: 1</span>
+        <svg width="${svgW}" height="${svgH}" viewBox="0 0 100 55" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;">
+          <polygon points="12,50 82,50 85,44 18,44" fill="#000" stroke="#000" stroke-width="1" />
+          <line x1="18" y1="38" x2="85" y2="38" stroke-width="4.5" />
+          <path d="M 18 38 L 14 38 C 22 24, 42 12, 62 12 C 78 12, 85 15, 85 38 Z" stroke-width="5" />
+          <line x1="84" y1="16" x2="93" y2="9" stroke-width="5" />
+          <rect x="52" y="19" width="25" height="11" rx="5.5" stroke-width="4.5" />
+        </svg>
+      </div>
+    </div>
+  `;
+
+  try {
+    printBox.className = 'receipt-print';
+    printBox.innerHTML = testLabelHTML;
+    await new Promise(r => setTimeout(r, 150));
+
+    await window.electron.print({
+      deviceName: labelPrinter || undefined,
+      copies: 1
+    });
+
+    await new Promise(r => setTimeout(r, 400));
+    printBox.innerHTML = '';
+    showToast('تم إرسال أمر الطباعة التجريبية بنجاح 🖨️', 'success');
+  } catch (err) {
+    showToast('حدث خطأ: ' + err.message, 'error');
   }
 }

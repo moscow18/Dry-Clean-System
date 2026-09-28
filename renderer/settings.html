@@ -2,9 +2,34 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — الإعدادات</title>
+  <title>DRY CLEAN — الإعدادات</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <style>
+    @media print {
+      html, body {
+        width: 100% !important;
+        min-height: 0 !important;
+        height: auto !important;
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+      }
+      body > *:not(.receipt-print) { display: none !important; }
+      .receipt-print {
+        display: block !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 80mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+      }
+      @page { margin: 0; size: auto; }
+    }
+
     .set-body {
       flex: 1;
       padding: 24px;
@@ -144,30 +169,52 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <div class="logo-icon">T</div>
+      <div class="logo-icon" id="sidebarLogoIcon">D</div>
       <div>
-        <div class="logo-text">EL-TARZY</div>
-        <div class="logo-sub">نظام إدارة محل الترزي</div>
+        <div class="logo-text" id="sidebarLogoText">DRY CLEAN</div>
+        <div class="logo-sub">نظام إدارة الدراي كلين</div>
       </div>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-nav-item" onclick="goBack()">
+      <div class="sidebar-nav-item" onclick="goBack()" title="الرئيسية">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        الرئيسية
+        <span class="nav-text">الرئيسية</span>
       </div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-title">أقسام الإعدادات</div>
-      <div class="sidebar-nav-item" onclick="showSection('store')">🏬 بيانات المحل</div>
-      <div class="sidebar-nav-item" onclick="showSection('cashier')">🔐 صلاحيات الكاشير</div>
-      <div class="sidebar-nav-item" onclick="showSection('users')">👥 إدارة المستخدمين</div>
-      <div class="sidebar-nav-item" onclick="showSection('backup')">💾 النسخ الاحتياطي</div>
-      <div class="sidebar-nav-item" onclick="showSection('whatsapp')">📱 واتساب</div>
-      <div class="sidebar-nav-item" onclick="showSection('wa-templates')">💬 قوالب الرسائل</div>
+      <div class="sidebar-nav-item active" onclick="showSection('store')" title="بيانات المحل">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span class="nav-text">بيانات المحل</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('cashier')" title="صلاحيات الكاشير">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span class="nav-text">صلاحيات الكاشير</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('users')" title="إدارة المستخدمين">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="nav-text">إدارة المستخدمين</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('backup')" title="النسخ الاحتياطي">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span class="nav-text">النسخ الاحتياطي</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('whatsapp')" title="واتساب">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        <span class="nav-text">واتساب</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('wa-templates')" title="قوالب الرسائل">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="nav-text">قوالب الرسائل</span>
+      </div>
+      <div class="sidebar-nav-item" onclick="showSection('printers')" title="الطابعات">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        <span class="nav-text">الطابعات</span>
+      </div>
     </div>
     <div class="sidebar-footer">
-      <div id="sidebarShopName">EL-TARZY</div>
-      <div>Dev Blue Tech © 2026</div>
+      <div id="sidebarShopName">Dry Clean</div>
+      <div>DRY CLEAN PRO © 2026</div>
     </div>
   </aside>
 
@@ -194,7 +241,7 @@
           <div class="set-section-title">بيانات المحل</div>
 
           <div class="logo-preview-area">
-            <div class="logo-preview" id="logoPreview">T</div>
+            <div class="logo-preview" id="logoPreview">D</div>
             <div>
               <button class="btn btn-accent btn-sm" onclick="chooseLogo()">اختر شعار المحل</button>
               <input type="file" id="logoInput" accept="image/*" style="display:none" onchange="handleLogoUpload(event)" />
@@ -204,7 +251,7 @@
 
           <div class="form-group mb-3">
             <label class="form-label">اسم المحل</label>
-            <input type="text" id="companyName" class="form-control" value="EL-Tarzy" />
+            <input type="text" id="companyName" class="form-control" value="Dry Clean" />
           </div>
 
           <div class="form-group mb-3">
@@ -274,21 +321,21 @@
           <div style="border-top:2px solid var(--border); padding-top:16px;">
             <div class="toggle-row">
               <div>
-                <div class="toggle-label">إظهار اسم الخياط على الفاتورة</div>
-                <div class="toggle-hint">يُطبع اسم الموظف/الخياط على الفاتورة</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="showTailorName" checked />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="toggle-row">
-              <div>
                 <div class="toggle-label">إظهار تليفون العميل على الفاتورة</div>
                 <div class="toggle-hint">يُطبع رقم تليفون العميل على الفاتورة</div>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="showCustomerPhone" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div>
+                <div class="toggle-label">إظهار عنوان العميل على الفاتورة</div>
+                <div class="toggle-hint">يُطبع عنوان العميل دائماً لطلبات الدليفري، ويمكن تفعيله لباقي الفواتير أيضاً</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="showCustomerAddress" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -424,7 +471,7 @@
                 <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="المبلغ المتبقي">{remaining}</span>
                 <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="تاريخ الفاتورة">{date}</span>
                 <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="وقت الفاتورة">{time}</span>
-                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="اسم الفني/الخياط المنفذ">{tailorName}</span>
+                <span class="wa-var-chip wa-var-chip--purple" onclick="copyVarChip(this)" title="اسم الطيار / مندوب التوصيل">{driverName}</span>
               </div>
             </div>
 
@@ -482,6 +529,11 @@
             <div class="set-group" style="grid-column: span 2;">
               <label>الطلب جاهز للاستلام</label>
               <textarea id="tplOrderReady" rows="5" style="width:100%;resize:vertical;font-family:inherit;padding:10px;border-radius:var(--radius);border:1px solid var(--border);"></textarea>
+            </div>
+
+            <div class="set-group" style="grid-column: span 2;">
+              <label>الطلب خرج للتوصيل (دليفري)</label>
+              <textarea id="tplOutForDelivery" rows="5" style="width:100%;resize:vertical;font-family:inherit;padding:10px;border-radius:var(--radius);border:1px solid var(--border);"></textarea>
             </div>
 
             <div class="set-group" style="grid-column: span 2;">
@@ -726,29 +778,22 @@
 
         <!-- ───── لوحة WhatsApp Web ───── -->
         <div id="panel-web_js" class="set-section" style="max-width:100%; margin-bottom:20px;">
-          <div class="set-section-title">📱 WhatsApp Web — ربط عبر QR Code</div>
+          <div class="set-section-title">WhatsApp Web — ربط عبر QR Code</div>
 
           <!-- QR Code -->
           <div id="waQrSection" style="display:none; text-align:center; padding:20px; background:var(--bg); border-radius:var(--radius); margin-bottom:20px;">
-            <div style="font-size:14px; font-weight:700; margin-bottom:12px; color:var(--accent);">📱 امسح الكود لربط واتساب</div>
-            <div style="background:#fff; border-radius:12px; padding:16px; display:inline-block; box-shadow: 0 4px 20px rgba(37,211,102,0.2);">
+            <div style="font-size:14px; font-weight:700; margin-bottom:12px; color:var(--accent);">امسح الكود لربط واتساب</div>
+            <div style="background:#fff; border-radius:12px; padding:16px; display:inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
               <img id="waQrImage" src="" alt="QR Code" style="width:200px;height:200px;display:block;" />
             </div>
             <div style="margin-top:12px; font-size:12px; color:var(--text-muted); line-height:1.6;">
-              واتساب ← النقاط الثلاث ← الأجهزة المرتبطة ← ربط جهاز
+              من الهاتف: الإعدادات ➔ الأجهزة المرتبطة ➔ ربط جهاز
             </div>
             <div id="waQrTimer" style="margin-top:8px; font-size:12px; color:var(--warning);"></div>
           </div>
 
-          <div style="background:var(--bg); border-radius:var(--radius); padding:16px;">
-            <div style="font-size:13px; font-weight:700; margin-bottom:10px;">كيف يعمل؟</div>
-            <div style="font-size:12px; color:var(--text-muted); line-height:2;">
-              ✂️ بعد الربط، البرنامج يقدر يبعت واتساب للعملاء تلقائياً عند:<br>
-              • تأكيد الفاتورة الجديدة<br>
-              • تغيير حالة الطلب لـ "جاهز للاستلام"<br>
-              • إرسال تذكير بالمبلغ المتبقي<br><br>
-              🔒 الجلسة بتتحفظ تلقائياً — مش هتحتاج تربط مرة تانية
-            </div>
+          <div style="background:var(--bg); border-radius:var(--radius); padding:14px; font-size:12px; color:var(--text-secondary); line-height:1.7;">
+            يتم إرسال إشعارات تأكيد الفاتورة وجاهزية الملابس وتذكير المتبقي تلقائياً بعد الربط.
           </div>
         </div>
 
@@ -809,34 +854,29 @@
           </div>
 
           <!-- زرار التحقق من القوالب -->
-          <div style="margin-bottom:20px; padding:14px; background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(99,102,241,0.02)); border:1.5px solid rgba(99,102,241,0.2); border-radius:var(--radius);">
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-              <div style="flex:1;">
-                <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:3px;">
-                  🔎 التحقق من القوالب على Meta
+          <div style="margin-bottom:20px; padding:14px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+              <div>
+                <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:2px;">
+                  التحقق من قوالب Meta
                 </div>
-                <div style="font-size:11px; color:var(--text-muted);">
-                  يجلب القوالب الفعلية من حسابك على Meta ويقارنها بما هو مكتوب أدناه — يكتشف أي خطأ في الاسم أو كود اللغة تلقائياً
+                <div style="font-size:11.5px; color:var(--text-muted);">
+                  فحص وتطابق أسماء القوالب ولغتها مع حساب Meta
                 </div>
               </div>
-              <button class="btn btn-sm" id="verifyTemplatesBtn" onclick="verifyMetaTemplates()"
-                style="background:rgba(99,102,241,0.15); color:#6366f1; border:1px solid rgba(99,102,241,0.35); font-weight:700; white-space:nowrap;">
-                🔎 تحقق من القوالب
+              <button class="btn btn-sm btn-outline" id="verifyTemplatesBtn" onclick="verifyMetaTemplates()"
+                style="font-weight:700; white-space:nowrap;">
+                فحص القوالب
               </button>
             </div>
             <div id="verifyTemplatesResult" style="margin-top:12px; display:none;"></div>
           </div>
 
           <!-- جدول خريطة القوالب -->
-          <div style="border-top:2px solid var(--border); padding-top:20px; margin-top:8px;">
-            <div style="font-weight:700; font-size:14px; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
-              📋 ربط القوالب المنطقية بأسماء القوالب الفعلية على Meta
+          <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:8px;">
+            <div style="font-weight:700; font-size:13px; margin-bottom:6px;">
+              ربط أسماء القوالب
             </div>
-            <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.7;">
-              اكتب في كل خانة اسم القالب الذي سجّلته على حساب Meta الخاص بك.
-              يجب أن يكون الاسم مطابقاً تماماً (حساس لحالة الأحرف).
-            </div>
-
             <div style="display:flex; flex-direction:column; gap:10px;" id="templateMapTable">
               <!-- يُنشأ ديناميكياً من JS -->
             </div>
@@ -854,9 +894,203 @@
 
       </div>
     </div>
+
+    <!-- Section: Printers -->
+    <div class="content-area" id="section-printers" style="display:none;">
+      <div style="padding:24px; max-width:900px;">
+        <div class="set-section full-width" style="max-width:100%;">
+          <div class="set-section-title">🖨️ إعدادات الطابعات وتخصيص الليبل</div>
+          <div style="margin-bottom:20px;font-size:13px;color:var(--text-muted);">
+            اختر الطابعات المخصصة وحدد أبعاد ملصق الملابس بدقة مع معاينة حية لشكل الملصق قبل الطباعة.
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:20px;">
+            <button class="btn btn-outline btn-sm" onclick="refreshPrinterLists()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              تحديث قائمة الطابعات
+            </button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
+            <div class="form-group">
+              <label class="form-label" style="font-size:13px;font-weight:700;">🧾 طابعة الفاتورة (Invoice Printer)</label>
+              <select id="invoicePrinterSelect" class="form-control">
+                <option value="">— الطابعة الافتراضية للنظام —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size:13px;font-weight:700;">🏷️ طابعة ملصق الملابس (Garment Label)</label>
+              <select id="labelPrinterSelect" class="form-control">
+                <option value="">— لا تطبع ليبل —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size:13px;font-weight:700;">🛍️ طابعة ملصق الأكياس (Bag Tag Printer)</label>
+              <select id="bagPrinterSelect" class="form-control">
+                <option value="">— لا تطبع ملصق أكياس —</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- LAN Connection Box for Device 2 -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+              <div>
+                <div style="font-weight:800;color:var(--text-primary);font-size:15px;">ربط محطة الأكياس (الجهاز الثاني)</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+                  عنوان IP وخادم الربط عبر الشبكة المحلية (LAN)
+                </div>
+              </div>
+              <div style="background:var(--accent-light);padding:5px 12px;border-radius:6px;font-weight:800;color:var(--accent);font-family:monospace;font-size:13px;direction:ltr;">
+                PORT: 3141
+              </div>
+            </div>
+
+            <!-- IP and URL Display and Copy Action -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+              <div style="display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 12px;">
+                <span style="font-weight:700;color:var(--text-muted);font-size:12px;white-space:nowrap;">IP:</span>
+                <input type="text" id="localNetworkIpInput" readonly style="flex:1;background:transparent;border:none;outline:none;font-family:monospace;font-size:14px;font-weight:800;color:var(--text-primary);direction:ltr;text-align:center;" value="جاري الفحص..." />
+                <button type="button" class="btn btn-outline btn-sm" id="btnCopyLocalIp" onclick="copyLocalNetworkIp()" style="white-space:nowrap;font-size:11px;padding:3px 8px;">
+                  نسخ IP
+                </button>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 12px;">
+                <span style="font-weight:700;color:var(--text-muted);font-size:12px;white-space:nowrap;">الرابط:</span>
+                <input type="text" id="localNetworkUrlInput" readonly style="flex:1;background:transparent;border:none;outline:none;font-family:monospace;font-size:13px;font-weight:800;color:var(--accent);direction:ltr;text-align:center;" value="http://...:3141" />
+                <button type="button" class="btn btn-primary btn-sm" id="btnCopyLocalUrl" onclick="copyLocalNetworkUrl()" style="white-space:nowrap;font-size:11px;padding:3px 8px;">
+                  نسخ
+                </button>
+              </div>
+            </div>
+
+            <!-- Action Buttons: Test in Browser & Open Firewall Port -->
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="openServerInBrowser()" style="font-size:12px;font-weight:700;">
+                تجربة في المتصفح
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" id="btnOpenFirewallPort" onclick="openFirewallPortBtn()" style="font-size:12px;font-weight:700;">
+                فتح جدار الحماية (Firewall)
+              </button>
+              <span id="firewallFeedback" style="font-size:12px;font-weight:700;"></span>
+            </div>
+
+            <!-- Quick Instructions -->
+            <div style="background:var(--bg);border-right:3px solid var(--accent);border-radius:4px;padding:8px 12px;font-size:11.5px;color:var(--text-secondary);line-height:1.6;">
+              أدخل الـ IP والمنفذ 3141 في تطبيق محطة الأكياس على الجهاز الثاني ثم اضغط "اختبار الاتصال".
+            </div>
+          </div>
+
+          <!-- Divider -->
+          <div style="border-top:1px solid var(--border);margin:20px 0;"></div>
+
+          <!-- Section: Dimensions & Live Preview -->
+          <div style="font-size:15px;font-weight:800;margin-bottom:16px;color:var(--text-primary);">
+            📐 أبعاد الاستيكر والمعاينة الحية
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px;align-items:start;">
+            <!-- Left: Dimension Controls -->
+            <div>
+              <div class="form-group" style="margin-bottom:16px;">
+                <label class="form-label" style="font-size:13px;font-weight:700;">العرض (Width mm)</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="number" id="labelWidthInput" class="form-control" style="max-width:110px;font-size:16px;font-weight:700;text-align:center;" min="20" max="100" value="38" oninput="updateLiveLabelPreview()" />
+                  <span style="font-weight:700;color:var(--text-muted);">مم</span>
+                </div>
+                <!-- Quick width presets -->
+                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(30, null)">30 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(38, null)">38 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(50, null)">50 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(80, null)">80 مم</button>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom:20px;">
+                <label class="form-label" style="font-size:13px;font-weight:700;">الارتفاع / الطول (Height mm)</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="number" id="labelHeightInput" class="form-control" style="max-width:110px;font-size:16px;font-weight:700;text-align:center;" min="15" max="150" value="35" oninput="updateLiveLabelPreview()" />
+                  <span style="font-weight:700;color:var(--text-muted);">مم</span>
+                </div>
+                <!-- Quick height presets -->
+                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(null, 25)">25 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(null, 30)">30 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(null, 35)">35 مم</button>
+                  <button type="button" class="btn btn-outline btn-xs" onclick="setLabelPreset(null, 50)">50 مم</button>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-success btn-lg" onclick="savePrinterSettings()">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  حفظ الإعدادات
+                </button>
+                <button class="btn btn-primary" onclick="testPrintLabel()">
+                  🖨️ طباعة تجريبية
+                </button>
+              </div>
+            </div>
+
+            <!-- Right: Live Preview Container -->
+            <div style="background:var(--bg);border:1.5px dashed var(--border);border-radius:12px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:220px;">
+              <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:12px;">
+                👁️ معاينة شكل الاستيكر الفعلي
+              </div>
+
+              <!-- The physical label sticker preview -->
+              <div id="liveLabelSticker" style="
+                background:#ffffff;
+                color:#000000;
+                border:1.5px solid #000;
+                border-radius:4px;
+                box-shadow:0 4px 14px rgba(0,0,0,0.15);
+                padding:4px 6px;
+                display:flex;
+                flex-direction:column;
+                justify-content:space-between;
+                text-align:center;
+                font-family:Arial,Tahoma,sans-serif;
+                box-sizing:border-box;
+                direction:ltr;
+                transition:all 0.2s ease;
+                min-width:120px;
+                min-height:100px;
+              ">
+                <div style="font-size:15px;font-weight:900;border-bottom:2px solid #000;padding-bottom:1px;letter-spacing:0.5px;line-height:1.1;">
+                  INV-2026-0001
+                </div>
+                <div style="font-size:32px;font-weight:900;line-height:1;margin:2px 0;">
+                  F
+                </div>
+                <div style="display:flex;justify-content:center;align-items:center;gap:6px;direction:rtl;line-height:1;">
+                  <span style="font-size:15px;font-weight:900;">القطع: 1</span>
+                  <svg width="28" height="15" viewBox="0 0 100 55" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;">
+                    <polygon points="12,50 82,50 85,44 18,44" fill="#000" stroke="#000" stroke-width="1" />
+                    <line x1="18" y1="38" x2="85" y2="38" stroke-width="4.5" />
+                    <path d="M 18 38 L 14 38 C 22 24, 42 12, 62 12 C 78 12, 85 15, 85 38 Z" stroke-width="5" />
+                    <line x1="84" y1="16" x2="93" y2="9" stroke-width="4.5" />
+                    <rect x="52" y="19" width="25" height="11" rx="5.5" stroke-width="4.5" />
+                  </svg>
+                </div>
+              </div>
+
+              <div id="liveLabelDimensionsBadge" style="margin-top:12px;font-size:12px;font-weight:700;color:var(--accent);background:rgba(99,102,241,0.1);padding:3px 10px;border-radius:20px;">
+                38 مم × 35 مم
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
+<div class="receipt-print" id="receiptPrint" style="display:none;"></div>
 <div class="toast-container" id="toastContainer"></div>
 
 <!-- New User Modal -->

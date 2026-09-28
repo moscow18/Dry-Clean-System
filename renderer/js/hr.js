@@ -13,10 +13,12 @@ window.hrCache = window.hrCache || {};
 
 function showSection(name){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.hr-nav-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('section-'+name).classList.add('active');
-  document.querySelectorAll('.hr-nav-btn').forEach(b=>{
-    if(b.onclick && b.onclick.toString().includes(`'${name}'`)) b.classList.add('active');
+  document.querySelectorAll('.hr-nav-btn, .sidebar-nav-item').forEach(b=>b.classList.remove('active'));
+  const targetSec = document.getElementById('section-'+name);
+  if(targetSec) targetSec.classList.add('active');
+  document.querySelectorAll('.hr-nav-btn, .sidebar-nav-item').forEach(b=>{
+    const oc = b.getAttribute('onclick') || (b.onclick ? b.onclick.toString() : '');
+    if(oc.includes(`'${name}'`)) b.classList.add('active');
   });
   document.getElementById('sectionTitle').textContent = sectionTitles[name]||name;
   
@@ -44,6 +46,29 @@ function showSection(name){
   if(name==='emp-sales'){ populateEmpSelect('empSalesEmp',true);
     const d=new Date(); document.getElementById('empSalesFrom').value=d.getFullYear()+'-01-01';
     document.getElementById('empSalesTo').value=d.toISOString().split('T')[0]; loadEmpSales(); }
+}
+
+// ─── Auto Absence ─────────────────────────────────────────────────────────────
+async function applyAutoAbsence() {
+  const fromInput = document.getElementById('attFilterFrom');
+  const date = fromInput?.value || getLocalISODate();
+  const confirm = await Swal.fire({
+    title: 'تطبيق غياب تلقائي',
+    html: `سيتم تسجيل <b>غياب</b> لكل موظف ليس له حضور أو إجازة في تاريخ:<br><b>${date}</b><br><small style="color:var(--text-muted)">العملية آمنة ولا تؤثر على السجلات الموجودة</small>`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'نعم، طبّق',
+    cancelButtonText: 'إلغاء'
+  });
+  if (!confirm.isConfirmed) return;
+
+  const res = await window.db.applyAutoAbsence(date);
+  if (res.success) {
+    showToast(`✅ تم تسجيل غياب لـ ${res.data.absencesInserted} موظف في ${date}`, 'success');
+    loadAttendance();
+  } else {
+    showToast('خطأ: ' + res.error, 'error');
+  }
 }
 
 
@@ -183,8 +208,6 @@ async function openEmpDetails(id) {
   const dedRes    = await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM deductions WHERE employee_id=? AND strftime('%Y-%m',date)=?`, [id, month]);
   const incRes    = await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM incentives WHERE employee_id=? AND strftime('%Y-%m',date)=?`, [id, month]);
   const paidRes   = await window.db.queryOne(`SELECT COALESCE(SUM(net_salary),0) as total_paid, COALESCE(SUM(total_advances),0) as paid_advances FROM salary_payments WHERE employee_id=? AND month=?`, [id, month]);
-  const commRes   = await window.db.queryOne(`SELECT COALESCE(SUM(net_total),0) as total_sales FROM invoices WHERE tailor_id=? AND strftime('%Y-%m',invoice_date)=?`, [id, month]);
-  const retRes    = await window.db.queryOne(`SELECT COALESCE(SUM(r.total_returned),0) as total_returned FROM returns r JOIN invoices i ON r.original_invoice_id=i.id WHERE i.tailor_id=? AND strftime('%Y-%m',i.invoice_date)=?`, [id, month]);
   const lvRes     = await window.db.queryOne(`SELECT COUNT(*) as count FROM leaves WHERE employee_id=? AND strftime('%Y-%m',leave_date)=?`, [id, month]);
   const attRes    = await window.db.queryOne(`SELECT COUNT(DISTINCT date) as days, SUM(late_minutes) as late FROM attendance WHERE employee_id=? AND strftime('%Y-%m',date)=?`, [id, month]);
 
@@ -199,9 +222,6 @@ async function openEmpDetails(id) {
     gross = emp.monthly_salary || 0;
   }
 
-  const commPct        = emp.commission_percent || 0;
-  const netSales       = Math.max(0, (commRes.data?.total_sales || 0) - (retRes.data?.total_returned || 0));
-  const commission     = netSales * (commPct / 100);
   const allowance      = emp.monthly_leave_days != null ? emp.monthly_leave_days : 2;
   const dayValue       = (emp.monthly_salary || 0) / 30; // base value on nominal salary for deductions
   const takenLeaves    = lvRes.data?.count || 0;
@@ -219,7 +239,7 @@ async function openEmpDetails(id) {
   const manualInc      = incRes.data?.total || 0;
   const totalDed       = manualDed + leaveDeduction;
   const totalInc       = manualInc + leaveBonus;
-  const totalDue       = gross + commission - manualAdv - totalDed + totalInc;
+  const totalDue       = gross - manualAdv - totalDed + totalInc;
   const totalPaid      = paidRes.data?.total_paid || 0;
   const netDue         = totalDue - totalPaid;
 
@@ -249,7 +269,7 @@ async function openEmpDetails(id) {
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <tbody>
         <tr style="background:var(--bg);">
-          <td style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--border);">إجمالي فواتير الخياط (أساس الحساب)</td>
+          <td style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--border);">إجمالي فواتير الموظف (أساس الحساب)</td>
           <td style="padding:8px 12px;text-align:left;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border);">${fmt(netSales)} ج</td>
         </tr>
         <tr>
@@ -257,7 +277,7 @@ async function openEmpDetails(id) {
           <td style="padding:8px 12px;text-align:left;font-weight:700;border-bottom:1px solid var(--border);">${fmt(gross)} ج</td>
         </tr>
         <tr style="background:var(--bg);">
-          <td style="padding:8px 12px;border-bottom:1px solid var(--border);">عمولة الخياط (${commPct}% من الفواتير)</td>
+          <td style="padding:8px 12px;border-bottom:1px solid var(--border);">عمولة الموظف (${commPct}% من الفواتير)</td>
           <td style="padding:8px 12px;text-align:left;font-weight:700;color:#8b5cf6;border-bottom:1px solid var(--border);">+${fmt(commission)} ج</td>
         </tr>
         <tr>
@@ -310,7 +330,7 @@ function buildEmpPrintHTML(mode) {
   const emp = d.emp;
   const isA4 = mode === 'a4';
   const settings = window._hrSettings || {};
-  const companyName = settings.company_name || 'EL-Tarzy';
+  const companyName = settings.company_name || 'Dry Clean';
 
   if (isA4) {
     return `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تقرير راتب ${emp.name}</title>
@@ -339,9 +359,9 @@ function buildEmpPrintHTML(mode) {
     </table>
     <table>
       <tr><th colspan="2">تفاصيل الراتب</th></tr>
-      <tr><td class="lbl">إجمالي فواتير الخياط (أساس الحساب)</td><td class="val-warn">${d.fmt(d.netSales)} جنيه</td></tr>
+      <tr><td class="lbl">إجمالي فواتير الموظف (أساس الحساب)</td><td class="val-warn">${d.fmt(d.netSales)} جنيه</td></tr>
       <tr><td class="lbl">الراتب الأساسي</td><td>${d.fmt(d.gross)} جنيه</td></tr>
-      <tr><td class="lbl">عمولة الخياط (${d.commPct}% من الفواتير)</td><td class="val-purple">+${d.fmt(d.commission)} جنيه</td></tr>
+      <tr><td class="lbl">عمولة الموظف (${d.commPct}% من الفواتير)</td><td class="val-purple">+${d.fmt(d.commission)} جنيه</td></tr>
       <tr><td class="lbl">إجمالي السلف المخصومة</td><td class="val-warn">-${d.fmt(d.manualAdv)} جنيه</td></tr>
       <tr><td class="lbl">الخصومات اليدوية</td><td class="val-neg">-${d.fmt(d.manualDed)} جنيه</td></tr>
       <tr><td class="lbl">خصم غياب زائد (${d.excessLeaves} يوم)</td><td class="val-neg">-${d.fmt(d.leaveDeduction)} جنيه</td></tr>
@@ -356,7 +376,7 @@ function buildEmpPrintHTML(mode) {
       <tr><td>أيام الحضور</td><td>دقائق التأخير</td><td>أيام الإجازة (مسجل/مسموح)</td></tr>
       <tr><td>${d.attDays} يوم</td><td>${d.lateMin} دقيقة</td><td>${d.takenLeaves}/${d.allowance} يوم</td></tr>
     </table>
-    <div class="footer">تم طباعة هذا التقرير من نظام إدارة الترزي — ${new Date().toLocaleDateString('ar-EG')}</div>
+    <div class="footer">تم طباعة هذا التقرير من نظام إدارة الدراي كلين — ${new Date().toLocaleDateString('ar-EG')}</div>
     </body></html>`;
   } else {
     // Thermal 80mm
@@ -376,7 +396,7 @@ function buildEmpPrintHTML(mode) {
     <div class="row"><span>الموظف:</span><span class="bold">${emp.name}</span></div>
     <div class="row"><span>الشهر:</span><span>${d.month}</span></div>
     <div class="line"></div>
-    <div class="row"><span>فواتير الخياط:</span><span>${d.fmt(d.netSales)} ج</span></div>
+    <div class="row"><span>فواتير الموظف:</span><span>${d.fmt(d.netSales)} ج</span></div>
     <div class="row"><span>الراتب الأساسي:</span><span class="bold">${d.fmt(d.gross)} ج</span></div>
     <div class="row"><span>عمولة (${d.commPct}%):</span><span>+${d.fmt(d.commission)} ج</span></div>
     <div class="line"></div>
@@ -391,7 +411,7 @@ function buildEmpPrintHTML(mode) {
     <div class="line"></div>
     <div class="net">الصافي: ${d.fmt(d.netDue)} جنيه</div>
     <div class="line"></div>
-    <div class="center" style="font-size:9px;margin-top:5px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG')}</div>
+    <div class="center" style="font-size:9px;margin-top:5px;">نظام دراي كلين — ${new Date().toLocaleDateString('ar-EG')}</div>
     </body></html>`;
   }
 }
@@ -663,13 +683,19 @@ async function deleteLeave(id){await window.db.run('DELETE FROM leaves WHERE id=
 async function saveAdvance(){
   const empId=document.getElementById('adv_emp').value;
   const amt=parseFloat(document.getElementById('adv_amount').value);
-  const treasury=document.getElementById('adv_treasury').value || 'الخزينة';
+  // طريقة الدفع: نقدي / فودافون كاش / إنستا باي
+  const payMethod = document.getElementById('adv_payment_method')?.value ||
+                    document.getElementById('adv_treasury')?.value || 'الخزينة';
   if(!empId||!amt||amt<=0){showToast('يرجى تعبئة البيانات','error');return;}
   const notes=document.getElementById('adv_notes').value.trim();
-  await window.db.run('INSERT INTO advances (employee_id,amount,notes) VALUES (?,?,?)',[empId,amt,notes]);
-  await window.db.addTreasuryEntry('مصروف','سلفة موظف',amt,treasury);
-  showToast('تم تسجيل السلفة ','success');
-  document.getElementById('adv_amount').value='';document.getElementById('adv_notes').value='';
+  await window.db.run(
+    'INSERT INTO advances (employee_id,amount,notes,payment_method) VALUES (?,?,?,?)',
+    [empId, amt, notes, payMethod]
+  );
+  await window.db.addTreasuryEntry('مصروف','سلفة موظف', amt, payMethod);
+  showToast('تم تسجيل السلفة ✅','success');
+  document.getElementById('adv_amount').value='';
+  document.getElementById('adv_notes').value='';
   loadAdvances();
 }
 async function loadAdvances(){
@@ -702,10 +728,14 @@ async function loadAdvances(){
   
   tbody.innerHTML = res.data.map(r => {
     total += r.amount || 0;
+    const pmLabel = r.payment_method === 'فودافون كاش' ? 'فودافون كاش' :
+                    r.payment_method === 'إنستا باي' ? 'إنستا باي' : 'نقدي';
+    const safePayMethod = (r.payment_method || 'الخزينة').replace(/'/g, "\\'");
     return `<tr class="${r.paid_back?'salary-row-highlight':''}">
       <td>${r.emp_name}</td><td style="color:var(--accent);font-weight:700;">${fmt(r.amount)} جنيه</td>
+      <td><span class="badge badge-info">${pmLabel}</span></td>
       <td>${r.date}</td><td>${r.notes||'—'}</td>
-      <td><button class="btn btn-sm btn-danger" onclick="deleteAdv(${r.id}, ${r.amount})">حذف</button></td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteAdv(${r.id}, ${r.amount}, '${safePayMethod}')">حذف</button></td>
     </tr>`;
   }).join('');
   
@@ -717,7 +747,7 @@ async function loadAdvances(){
 
 async function payAdvance(id){await window.db.run('UPDATE advances SET paid_back=1 WHERE id=?',[id]);loadAdvances();}
 
-async function deleteAdv(id, amount){
+async function deleteAdv(id, amount, payMethod){
   const confirmDel = await Swal.fire({
     title: 'تأكيد الحذف؟',
     text: 'هل أنت متأكد من حذف هذه السلفة؟ سيتم إرجاع المبلغ إلى الخزينة تلقائياً.',
@@ -731,9 +761,9 @@ async function deleteAdv(id, amount){
   if(!confirmDel.isConfirmed) return;
   
   await window.db.run('DELETE FROM advances WHERE id=?',[id]);
-  
-  // Restore money to treasury
-  await window.db.addTreasuryEntry('إيراد', 'استرداد سلفة محذوفة', amount, 'الخزينة');
+  // إرجاع المبلغ لنفس الخزينة التي خرجت منها
+  const treasury = payMethod || 'الخزينة';
+  await window.db.addTreasuryEntry('إيراد', 'استرداد سلفة محذوفة', amount, treasury);
   
   showToast('تم حذف السلفة وإرجاع المبلغ للخزينة', 'success');
   loadAdvances();
@@ -760,7 +790,7 @@ async function printAdvancesReport(mode) {
   }).join('');
   
   const settRes = await window.db.getSettings();
-  const companyName = settRes.success && settRes.data ? settRes.data.company_name : 'EL-Tarzy';
+  const companyName = settRes.success && settRes.data ? settRes.data.company_name : 'Dry Clean';
   
   let html = '';
   if (mode === 'a4') {
@@ -789,7 +819,7 @@ async function printAdvancesReport(mode) {
       <tbody>${rowsHtml}</tbody>
       <tfoot><tr class="total-row"><td colspan="3">الإجمالي</td><td>${fmt(total)} جنيه</td></tr></tfoot>
     </table>
-    <div class="footer">طُبع بواسطة نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    <div class="footer">طُبع بواسطة نظام دراي كلين — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   } else {
     // Thermal
@@ -819,7 +849,7 @@ async function printAdvancesReport(mode) {
     </table>
     <div class="total">الإجمالي: ${fmt(total)} ج</div>
     <div class="line"></div>
-    <div class="center" style="font-size:9px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+    <div class="center" style="font-size:9px;">نظام دراي كلين — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
     </body></html>`;
   }
   
@@ -930,13 +960,6 @@ async function loadSalaryReport(){
     const incRes=await window.db.queryOne(`SELECT COALESCE(SUM(amount),0) as total FROM incentives WHERE employee_id=? AND strftime('%Y-%m',date)=?`,[emp.id,month]);
     const paidRes=await window.db.queryOne(`SELECT COALESCE(SUM(net_salary),0) as total_paid, COALESCE(SUM(total_advances),0) as paid_advances FROM salary_payments WHERE employee_id=? AND month=?`,[emp.id,month]);
     
-    const commRes = await window.db.queryOne(`SELECT COALESCE(SUM(net_total), 0) as total_sales FROM invoices WHERE tailor_id=? AND strftime('%Y-%m', invoice_date)=?`, [emp.id, month]);
-    const returnsRes = await window.db.queryOne(`SELECT COALESCE(SUM(r.total_returned), 0) as total_returned FROM returns r JOIN invoices i ON r.original_invoice_id = i.id WHERE i.tailor_id=? AND strftime('%Y-%m', i.invoice_date)=?`, [emp.id, month]);
-    
-    const netSales = (commRes.data?.total_sales || 0) - (returnsRes.data?.total_returned || 0);
-    const commissionPercent = emp.commission_percent || 0;
-    const commission = Math.max(0, netSales) * (commissionPercent / 100);
-
     // ─── حساب الراتب: يومية أم شهري ───────────────────────────────
     let gross = 0;
     let grossLabel = '';
@@ -982,7 +1005,7 @@ async function loadSalaryReport(){
     const ded = manualDed + leaveDeduction;
     const inc = manualInc + leaveBonus;
     
-    const totalDue  = gross + commission - advances - ded + inc;
+    const totalDue  = gross - advances - ded + inc;
     const totalPaid = paidRes.data?.total_paid || 0;
     const net  = totalDue - totalPaid;
     const paid = net <= 0 && totalPaid > 0 && Math.abs(net) < 0.01;
@@ -995,7 +1018,6 @@ async function loadSalaryReport(){
     rows+=`<tr class="${paid?'salary-row-highlight':''}">
       <td style="font-weight:600;">${emp.name} ${salaryType==='يومية'?'<span class="badge badge-warning" style="font-size:9px;">يومية</span>':''}</td>
       <td style="color:var(--accent);">${fmt(gross)}${grossLabel}${overtimeSuffix}</td>
-      <td style="color:#8b5cf6; font-weight:bold;">${fmt(commission)} ${commissionPercent > 0 ? `<small style="font-size:10px;color:gray;">(%${commissionPercent})</small>` : ''}</td>
       <td style="color:var(--warning);">${fmt(advances)}</td>
       <td style="color:var(--danger);">${fmt(ded)}</td>
       <td style="color:var(--success);">${fmt(inc)}</td>
@@ -1004,7 +1026,7 @@ async function loadSalaryReport(){
       <td>${(totalPaid > 0) ? `<button class="btn btn-sm btn-danger" onclick="reverseSalaryPayment(${emp.id},'${month}')">إلغاء الصرف</button>` : ((net <= 0) ? '' : `<button class="btn btn-sm btn-success" onclick="paySalary(${emp.id},'${emp.name}',${gross},${advances},${ded},${inc},${net},'${month}','${salaryType}',${emp.monthly_salary||0},${emp.work_hours_per_day||8},${totalLateMin},${totalExtraMin})">صرف الراتب</button>`)}</td>
     </tr>`;
   }
-  tbody.innerHTML = rows || '<tr><td colspan="9" class="table-empty">لا يوجد موظفون</td></tr>';
+  tbody.innerHTML = rows || '<tr><td colspan="8" class="table-empty">لا يوجد موظفون</td></tr>';
 }
 
 let pendingSalary = null;
@@ -1164,7 +1186,7 @@ async function loadEmpSales(){
            (i.net_total - COALESCE((SELECT SUM(total_returned) FROM returns WHERE original_invoice_id = i.id), 0)) as dynamic_net_total
            FROM invoices i LEFT JOIN customers c ON i.customer_id=c.id WHERE i.invoice_date BETWEEN ? AND ?`;
   let params=[from||'2000-01-01',to||'2099-12-31'];
-  if(empId){sql+=' AND (i.employee_id=? OR i.tailor_id=?)';params.push(empId, empId);}
+  if(empId){sql+=' AND i.employee_id=?';params.push(empId);}
   sql+=' ORDER BY i.id DESC';
   
   const res=await window.db.query(sql,params);
@@ -1176,7 +1198,7 @@ async function loadEmpSales(){
                 LEFT JOIN customers c ON i.customer_id = c.id 
                 WHERE r.return_date BETWEEN ? AND ?`;
   let retParams = [from||'2000-01-01',to||'2099-12-31'];
-  if(empId){retSql+=' AND (i.employee_id=? OR i.tailor_id=?)';retParams.push(empId, empId);}
+  if(empId){retSql+=' AND i.employee_id=?';retParams.push(empId);}
   retSql+=' ORDER BY r.id DESC';
   
   const retRes = await window.db.query(retSql, retParams);

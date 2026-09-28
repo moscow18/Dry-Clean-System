@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — التقرير اليومي الشامل</title>
+  <title>DRY CLEAN — التقرير اليومي الشامل</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -97,40 +97,70 @@
     #printFooter { display: none; text-align: center; margin-top: 14px; font-size: 10px; color: #555; border-top: 1px solid #ccc; padding-top: 6px; }
 
     /* ═══════════════════════════════════════════════════════
-       SHARED PRINT RULES — used by BOTH @media print AND
-       body.print-shared (so printToPDF gets same result as window.print)
+       PRINT & PDF EXPORT RULES
     ═══════════════════════════════════════════════════════ */
-    @media print, screen {
-      body.print-shared { background: #fff !important; }
-      body.print-shared .rpt-wrap            { padding: 10mm !important; max-width: none !important; box-sizing: border-box !important; }
-      body.print-shared .print-header        { display: block !important; }
-      body.print-shared .rpt-toolbar         { display: none !important; }
-      body.print-shared #printFooter         { display: block !important; }
+    @media print {
+      body { background: #fff !important; }
+      .rpt-wrap            { padding: 10mm !important; max-width: none !important; box-sizing: border-box !important; }
+      .print-header        { display: block !important; }
+      .rpt-toolbar         { display: none !important; }
+      #printFooter         { display: block !important; }
       
-      body.print-shared .sum-grid            { display: block !important; margin-bottom: 20px !important; }
-      body.print-shared .sum-card            { 
+      .sum-grid            { display: block !important; margin-bottom: 20px !important; }
+      .sum-card            { 
         display: flex !important; justify-content: space-between !important; 
         border-bottom: 1px dashed #000 !important; border-radius: 0 !important; 
         padding: 5px 0 !important; margin-bottom: 0 !important; box-shadow: none !important; background: transparent !important;
       }
-      body.print-shared .sum-card .s-lbl    { color: #000 !important; font-weight: 700 !important; }
-      body.print-shared .sum-card .s-val    { color: #000 !important; font-weight: 900 !important; }
-      body.print-shared .sum-card .s-icon   { display: none !important; }
+      .sum-card .s-lbl    { color: #000 !important; font-weight: 700 !important; }
+      .sum-card .s-val    { color: #000 !important; font-weight: 900 !important; }
+      .sum-card .s-icon   { display: none !important; }
 
-      body.print-shared .trs-grid            { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
-      body.print-shared .trs-card            { border: 1px solid #000 !important; border-radius: 3px !important; padding: 8px !important; flex: 1 1 45% !important; background: transparent !important; box-shadow: none !important; }
-      body.print-shared .trs-card .t-lbl    { color: #000 !important; }
-      body.print-shared .trs-card .t-val    { color: #000 !important; font-size: 14pt !important; }
-      body.print-shared .c-green             { color: #000 !important; }
-      body.print-shared .c-red               { color: #000 !important; }
+      .trs-grid            { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+      .trs-card            { border: 1px solid #000 !important; border-radius: 3px !important; padding: 8px !important; flex: 1 1 45% !important; background: transparent !important; box-shadow: none !important; }
+      .trs-card .t-lbl    { color: #000 !important; }
+      .trs-card .t-val    { color: #000 !important; font-size: 14pt !important; }
+      .c-green             { color: #000 !important; }
+      .c-red               { color: #000 !important; }
 
-      body.print-shared .rpt-section         { border: 1px solid #000 !important; border-radius: 0 !important; margin-bottom: 8px !important; background: transparent !important; box-shadow: none !important; }
-      body.print-shared .rpt-sec-title       { background: transparent !important; color: #000 !important; border-bottom: 1px solid #000 !important; padding: 5px 10px !important; font-weight: bold !important; }
-      body.print-shared .rpt-table th        { background: transparent !important; color: #000 !important; padding: 5px 8px !important; font-size: 9pt !important; border-bottom: 1px solid #000 !important; }
-      body.print-shared .rpt-table td        { padding: 5px 8px !important; border-bottom: 1px solid #ccc !important; font-size: 9pt !important; color: #000 !important; }
-      body.print-shared .rpt-total-row td    { background: transparent !important; color: #000 !important; font-weight: bold !important; border-top: 2px solid #000 !important; border-bottom: none !important; }
-      body.print-shared .badge               { background: none !important; color: #000 !important; border: 1px solid #000 !important; box-shadow: none !important; }
+      .rpt-section         { border: 1px solid #000 !important; border-radius: 0 !important; margin-bottom: 8px !important; background: transparent !important; box-shadow: none !important; }
+      .rpt-sec-title       { background: transparent !important; color: #000 !important; border-bottom: 1px solid #000 !important; padding: 5px 10px !important; font-weight: bold !important; }
+      .rpt-table th        { background: transparent !important; color: #000 !important; padding: 5px 8px !important; font-size: 9pt !important; border-bottom: 1px solid #000 !important; }
+      .rpt-table td        { padding: 5px 8px !important; border-bottom: 1px solid #ccc !important; font-size: 9pt !important; color: #000 !important; }
+      .rpt-total-row td    { background: transparent !important; color: #000 !important; font-weight: bold !important; border-top: 2px solid #000 !important; border-bottom: none !important; }
+      .badge               { background: none !important; color: #000 !important; border: 1px solid #000 !important; box-shadow: none !important; }
     }
+
+    /* Screen mode for PDF generation (body.print-shared) */
+    body.print-shared { background: #fff !important; }
+    body.print-shared .rpt-wrap            { padding: 10mm !important; max-width: none !important; box-sizing: border-box !important; }
+    body.print-shared .print-header        { display: block !important; }
+    body.print-shared .rpt-toolbar         { display: none !important; }
+    body.print-shared #printFooter         { display: block !important; }
+    
+    body.print-shared .sum-grid            { display: block !important; margin-bottom: 20px !important; }
+    body.print-shared .sum-card            { 
+      display: flex !important; justify-content: space-between !important; 
+      border-bottom: 1px dashed #000 !important; border-radius: 0 !important; 
+      padding: 5px 0 !important; margin-bottom: 0 !important; box-shadow: none !important; background: transparent !important;
+    }
+    body.print-shared .sum-card .s-lbl    { color: #000 !important; font-weight: 700 !important; }
+    body.print-shared .sum-card .s-val    { color: #000 !important; font-weight: 900 !important; }
+    body.print-shared .sum-card .s-icon   { display: none !important; }
+
+    body.print-shared .trs-grid            { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+    body.print-shared .trs-card            { border: 1px solid #000 !important; border-radius: 3px !important; padding: 8px !important; flex: 1 1 45% !important; background: transparent !important; box-shadow: none !important; }
+    body.print-shared .trs-card .t-lbl    { color: #000 !important; }
+    body.print-shared .trs-card .t-val    { color: #000 !important; font-size: 14pt !important; }
+    body.print-shared .c-green             { color: #000 !important; }
+    body.print-shared .c-red               { color: #000 !important; }
+
+    body.print-shared .rpt-section         { border: 1px solid #000 !important; border-radius: 0 !important; margin-bottom: 8px !important; background: transparent !important; box-shadow: none !important; }
+    body.print-shared .rpt-sec-title       { background: transparent !important; color: #000 !important; border-bottom: 1px solid #000 !important; padding: 5px 10px !important; font-weight: bold !important; }
+    body.print-shared .rpt-table th        { background: transparent !important; color: #000 !important; padding: 5px 8px !important; font-size: 9pt !important; border-bottom: 1px solid #000 !important; }
+    body.print-shared .rpt-table td        { padding: 5px 8px !important; border-bottom: 1px solid #ccc !important; font-size: 9pt !important; color: #000 !important; }
+    body.print-shared .rpt-total-row td    { background: transparent !important; color: #000 !important; font-weight: bold !important; border-top: 2px solid #000 !important; border-bottom: none !important; }
+    body.print-shared .badge               { background: none !important; color: #000 !important; border: 1px solid #000 !important; box-shadow: none !important; }
 
     /* ═══════════════════════════════════════════════════════
        THERMAL PRINT — 80mm receipt, black & white
@@ -165,10 +195,11 @@
         display: block !important; margin-bottom: 4px !important;
       }
       body.thermal-mode .trs-card {
-        border: 1px solid #000 !important; border-radius: 2px !important; padding: 3px 6px !important; margin-bottom: 3px !important;
+        display: flex !important; justify-content: space-between !important;
+        border: none !important; padding: 2px 0 !important; border-radius: 0 !important; background: transparent !important;
       }
-      body.thermal-mode .trs-card .t-lbl { font-size: 7.5pt !important; color: #000 !important; }
-      body.thermal-mode .trs-card .t-val { font-size: 8.5pt !important; color: #000 !important; font-weight: bold !important; }
+      body.thermal-mode .trs-card .t-lbl { font-size: 8pt !important; color: #000 !important; }
+      body.thermal-mode .trs-card .t-val { font-size: 8pt !important; font-weight: 900 !important; color: #000 !important; }
       body.thermal-mode .rpt-total-row td { background: #000 !important; color: #fff !important; }
       body.thermal-mode .badge           { border: none !important; padding: 0 !important; font-size: 6.5pt !important; }
     }
@@ -275,7 +306,7 @@
     <div id="revenuesList"></div>
   </div>
 
-  <div id="printFooter">تقرير مُصدَّر بواسطة نظام الترزي — EL-Tarzy</div>
+  <div id="printFooter">تقرير مُصدَّر بواسطة نظام دراي كلين — DRY CLEAN PRO</div>
 
 </div><!-- /rpt-wrap -->
 

@@ -14,9 +14,11 @@ const fs = require('fs');
 
 // ── القوالب الافتراضية للرسائل النصية ──
 const DEFAULT_TEMPLATES = {
-  invoiceConfirm: `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالفني المنفذ: {tailorName}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع للتصاليح: 48 ساعة من تاريخ الفاتورة\nكل غرزة بتشيلها عنينا، وكل قطعة بنسلمها وإحنا مطمنين إنها بأحسن صورة.\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
+  invoiceConfirm: `أهلاً {customerName} 🤍\n\nطلبك اتسجل عندنا في {shopName} ✂️\n📋 تفاصيل الفاتورة:\nرقم الفاتورة: {invoiceNumber}\nتاريخ الاستلام: {date} {time}\nالإجمالي: {total} جنيه\nالمدفوع: {paid} جنيه\nالباقي: {remaining} جنيه\n🧵 ميعاد التسليم المتوقع: 48 ساعة من تاريخ الفاتورة\nفي انتظار إطلالتك الجديدة 🤍\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
 
   orderReady: `أهلاً {customerName} 🤍\n\nشغلك جاهز عندنا في {shopName} ✂️\nتم تجهيز طلبك بفاتورة رقم {invoiceNumber} وفي انتظار استلامك في أقرب فرصة.\nنتمنى نكون عند حسن ظنك 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
+
+  outForDelivery: `أهلاً {customerName} 🤍\n\nطلبك خرج للتوصيل الآن من {shopName} 🛵\nفاتورة رقم {invoiceNumber}\nالطيار: {driverName}\n\nنتمنى لك يوماً سعيداً 🤍\n{shopName}\n📞 {contactPhone}`,
 
   delivered: `أهلاً {customerName} 🤍\n\nشكراً لاستلامك طلبك من {shopName} ✂️\nفاتورة رقم {invoiceNumber} — تم التسليم بنجاح ✅\n\nنتشرف بخدمتك دايماً وفي انتظار إطلالتك القادمة 🤍\n\n{shopName}\n📍 {address}\n📞 {contactPhone}`,
 
@@ -389,6 +391,14 @@ class WebJSProvider extends BaseWhatsAppProvider {
       case 'order_ready': {
         const tpl = (s.wa_tpl_order_ready) || DEFAULT_TEMPLATES.orderReady;
         return applyTpl(tpl, commonVars);
+      }
+
+      case 'out_for_delivery': {
+        const tpl = (s.wa_tpl_out_for_delivery) || DEFAULT_TEMPLATES.outForDelivery;
+        return applyTpl(tpl, {
+          ...commonVars,
+          driverName: payload.driverName || 'مندوب التوصيل',
+        });
       }
 
       case 'order_delivered': {

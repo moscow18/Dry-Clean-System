@@ -36,7 +36,8 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "El-Tarzy"
+    "shortcutName": "El-Tarzy",
+    "include": "build/installer.nsh"
   },
   "directories": {
     "output": "dist-win7"

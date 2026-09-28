@@ -49,9 +49,17 @@ contextBridge.exposeInMainWorld('db', {
   // Invoice
   generateInvoiceNumber: () => ipcRenderer.invoke('db:previewInvoiceNumber'),
   saveInvoice: (invoiceData, items) => ipcRenderer.invoke('db:saveInvoice', invoiceData, items),
-  updateInvoiceStatus: (invoiceId, status) => ipcRenderer.invoke('db:updateInvoiceStatus', invoiceId, status),
+  updateInvoiceStatus: (invoiceId, status, driverId) => ipcRenderer.invoke('db:updateInvoiceStatus', invoiceId, status, driverId),
+  updateDeliveryDriver: (invoiceId, driverId) => ipcRenderer.invoke('db:updateDeliveryDriver', invoiceId, driverId),
   payInvoiceRemaining: (invoiceId, amount, safeType) => ipcRenderer.invoke('db:payInvoiceRemaining', invoiceId, amount, safeType),
   reversePayment: (invoiceId, amount) => ipcRenderer.invoke('db:reversePayment', invoiceId, amount),
+
+  // Bag Tracking
+  setBagCount: (invoiceId, bagCount) => ipcRenderer.invoke('db:setBagCount', invoiceId, bagCount),
+  confirmBagScan: (qrCode) => ipcRenderer.invoke('db:confirmBagScan', qrCode),
+  getInvoiceBags: (invoiceId) => ipcRenderer.invoke('db:getInvoiceBags', invoiceId),
+  getUnprintedBags: () => ipcRenderer.invoke('db:getUnprintedBags'),
+  markBagsPrinted: (bagIds) => ipcRenderer.invoke('db:markBagsPrinted', bagIds),
 
   // Returns
   saveReturn: (returnData, items) => ipcRenderer.invoke('db:saveReturn', returnData, items),
@@ -74,6 +82,16 @@ contextBridge.exposeInMainWorld('db', {
 
   // Selective Reset
   selectiveReset: (options) => ipcRenderer.invoke('db:selectiveReset', options),
+
+  // Truncate Operations
+  truncateInvoices: () => ipcRenderer.invoke('db:truncateInvoices'),
+  truncateFinance: () => ipcRenderer.invoke('db:truncateFinance'),
+
+  // Batch Upsert Customers (Excel Import)
+  batchUpsertCustomers: (list) => ipcRenderer.invoke('db:batchUpsertCustomers', list),
+
+  // Auto Absence
+  applyAutoAbsence: (date) => ipcRenderer.invoke('hr:applyAutoAbsence', date),
 });
 
 contextBridge.exposeInMainWorld('electron', {
@@ -90,18 +108,27 @@ contextBridge.exposeInMainWorld('electron', {
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:showSaveDialog', options),
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:showOpenDialog', options),
 
+  // Filesystem helpers
+  writeFile: (filePath, base64Data) => ipcRenderer.invoke('fs:writeFile', filePath, base64Data),
+  readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
+
   // External
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   // App info
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getUserDataPath: () => ipcRenderer.invoke('app:getUserDataPath'),
+  getLocalIp: () => ipcRenderer.invoke('app:getLocalIp'),
+  getNetworkDetails: () => ipcRenderer.invoke('app:getNetworkDetails'),
+  openFirewallPort: () => ipcRenderer.invoke('app:openFirewallPort'),
   getLogoPath: (dbPath) => ipcRenderer.invoke('app:getLogoPath', dbPath),
   restart: () => ipcRenderer.invoke('app:restart'),
   factoryReset: () => ipcRenderer.invoke('app:factoryReset'),
   printToPDF: (path) => ipcRenderer.invoke('app:printToPDF', path),
   selectFolder: () => ipcRenderer.invoke('app:selectFolder'),
   generateAndSendReport: (opts) => ipcRenderer.invoke('app:generateAndSendReport', opts),
+  getPrinters: () => ipcRenderer.invoke('app:getPrinters'),
+  printLabel: (opts) => ipcRenderer.invoke('app:printLabel', opts),
 
   // Quit flow — listen for backup confirmation from main process
   onConfirmBackupBeforeQuit: (callback) => {
@@ -122,6 +149,7 @@ contextBridge.exposeInMainWorld('whatsapp', {
   send:            (phone, msg) => ipcRenderer.invoke('whatsapp:send', phone, msg),
   sendInvoiceConfirm:       (d) => ipcRenderer.invoke('whatsapp:sendInvoiceConfirm', d),
   sendOrderReady:           (d) => ipcRenderer.invoke('whatsapp:sendOrderReady', d),
+  sendOutForDelivery:       (d) => ipcRenderer.invoke('whatsapp:sendOutForDelivery', d),
   sendDelivered:            (d) => ipcRenderer.invoke('whatsapp:sendDelivered', d),
   sendDeliveredWithFullPayment: (d) => ipcRenderer.invoke('whatsapp:sendDeliveredWithFullPayment', d),
   sendPartialPayment:       (d) => ipcRenderer.invoke('whatsapp:sendPartialPayment', d),
@@ -156,4 +184,29 @@ contextBridge.exposeInMainWorld('activation', {
   activate:      (serial) => ipcRenderer.invoke('activation:activate', serial),
   getHwId:       ()       => ipcRenderer.invoke('activation:getHwId'),
   getInstallId:  ()       => ipcRenderer.invoke('activation:getInstallId'),
+});
+
+// ─── Excel API (xlsx) ─────────────────────────────────────────────────────────
+let _xlsxModule = null;
+try {
+  _xlsxModule = require('xlsx');
+} catch (e) {
+  console.error('Failed to require xlsx in preload:', e);
+}
+
+contextBridge.exposeInMainWorld('excel', {
+  exportToBuffer: (jsonData, sheetName = 'Sheet1') => {
+    if (!_xlsxModule) throw new Error('مكتبة Excel غير متوفرة');
+    const ws = _xlsxModule.utils.json_to_sheet(jsonData);
+    const wb = _xlsxModule.utils.book_new();
+    _xlsxModule.utils.book_append_sheet(wb, ws, sheetName);
+    return _xlsxModule.write(wb, { type: 'base64', bookType: 'xlsx' });
+  },
+  parseFileBuffer: (base64Data) => {
+    if (!_xlsxModule) throw new Error('مكتبة Excel غير متوفرة');
+    const wb = _xlsxModule.read(base64Data, { type: 'base64' });
+    const firstSheet = wb.SheetNames[0];
+    const ws = wb.Sheets[firstSheet];
+    return _xlsxModule.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  }
 });

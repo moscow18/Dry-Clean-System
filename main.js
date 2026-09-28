@@ -28,6 +28,7 @@ const {
 } = require('./whatsapp/whatsapp-manager');
 const { setupActivationIpc, getActivationStatus } = require('./activation');
 const { startPerformanceManager, stopPerformanceManager } = require('./performance-manager');
+const { startApiServer, stopApiServer, getNetworkIps } = require('./server');
 
 let mainWindow = null;
 let allowQuit = false;
@@ -47,14 +48,20 @@ function createWindow() {
     frame: true,
     titleBarStyle: 'default',
     backgroundColor: '#F0F2F7',  // المطابقة التامة للون خلفية التطبيق لمحو أي وميض
-    title: 'الترزي — نظام إدارة محل الترزي',
+    title: 'DRY CLEAN — نظام إدارة الدراي كلين',
     ...(fs.existsSync(path.join(__dirname, 'assets', 'icon.png')) ? { icon: path.join(__dirname, 'assets', 'icon.png') } : {}),
     show: false  // نخفيها حتى تكتمل لمنع الوميض
   });
   logError('BrowserWindow created.');
 
-  // دائماً افتح صفحة الدخول — الداشبورد يتحكم في وضع التجربة/القراءة فقط
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html'));
+  // فحص حالة التفعيل: إذا لم يكن البرنامج مفعلاً، يتم فتح صفحة التفعيل فقط ومنع الدخول إطلاقاً
+  const act = getActivationStatus();
+  if (!act.activated) {
+    console.log('[Main] System is not activated — strictly opening activation screen');
+    mainWindow.loadFile(path.join(__dirname, 'renderer', 'activation.html'));
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html'));
+  }
 
   let windowShown = false;
   mainWindow.once('ready-to-show', () => {
@@ -77,6 +84,11 @@ function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     // تأخير 5 ثوانٍ فقط — وقت كافٍ لتسجيل الدخول
     setTimeout(() => {
+      const act = getActivationStatus();
+      if (!act.activated) {
+        console.log('[Main] Skipping WhatsApp initialization — system not activated');
+        return;
+      }
       const { getDb } = require('./database/db');
       const db = getDb(app);
       initWhatsAppManagerWithApp(db, mainWindow, app).catch(err => {
@@ -113,6 +125,16 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.whenReady().then(() => {
   setupIpcHandlers(ipcMain, app);
   setupActivationIpc(ipcMain, app);  // ← نظام التفعيل
+
+  // تشغيل خادم الشبكة المحلية للربط مع الجهاز الثاني (محطة الأكياس)
+  try {
+    console.log('[Main] Starting LAN API Server on port 3141...');
+    startApiServer(app);
+  } catch (err) {
+    logError('Failed to start API server: ' + err.message);
+    console.error('[Main] Failed to start API server:', err);
+  }
+
   createWindow();
 
   // بدء Performance Manager بعد إنشاء النافذة
@@ -124,6 +146,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  stopApiServer();
   stopPerformanceManager();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -151,6 +174,12 @@ ipcMain.on('cancel-quit', () => {
 // ─── Navigation IPC ────────────────────────────────────────────────────────────
 ipcMain.handle('navigate', async (_, page) => {
   if (!mainWindow) return;
+  const act = getActivationStatus();
+  if (!act.activated && page !== 'activation.html') {
+    console.warn(`[Main] Blocked navigation attempt to '${page}' — system is not activated`);
+    mainWindow.loadFile(path.join(__dirname, 'renderer', 'activation.html'));
+    return;
+  }
   const pagePath = path.join(__dirname, 'renderer', page);
   mainWindow.loadFile(pagePath);
 });
@@ -309,12 +338,82 @@ ipcMain.handle('app:generateAndSendReport', async (_, { date, savePath, phone })
 // ─── App info ──────────────────────────────────────────────────────────────────
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getUserDataPath', () => app.getPath('userData'));
+ipcMain.handle('app:getLocalIp', () => {
+  try {
+    const ips = getNetworkIps();
+    const primary = ips.find(i => i.isPreferred) || ips[0];
+    if (primary && primary.address) return primary.address;
+  } catch (e) {
+    console.error('Error getting local IP:', e);
+  }
+  return '127.0.0.1';
+});
+
+ipcMain.handle('app:getNetworkDetails', () => {
+  try {
+    const ips = getNetworkIps();
+    const primary = ips.find(i => i.isPreferred) || ips[0] || { address: '127.0.0.1' };
+    return {
+      success: true,
+      primaryIp: primary.address,
+      port: 3141,
+      serverUrl: `http://${primary.address}:3141`,
+      allIps: ips
+    };
+  } catch (e) {
+    return {
+      success: false,
+      primaryIp: '127.0.0.1',
+      port: 3141,
+      serverUrl: 'http://127.0.0.1:3141',
+      allIps: []
+    };
+  }
+});
+
+ipcMain.handle('app:openFirewallPort', async () => {
+  if (process.platform !== 'win32') {
+    return { success: false, error: 'هذه الميزة متوافقة مع نظام Windows فقط' };
+  }
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    // تشغيل netsh لإضافة منفذ 3141 لكافة بروفايلات الشبكة بصلاحيات المسؤول
+    const psCmd = `Start-Process netsh -ArgumentList 'advfirewall firewall add rule name="EL-Tarzy Bag Station Port 3141" dir=in action=allow protocol=TCP localport=3141 profile=any' -Verb RunAs -Wait`;
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd}"`, (err) => {
+      if (err) {
+        resolve({ success: false, error: 'تم إلغاء نافذة الإذن أو حدث خطأ: ' + err.message });
+      } else {
+        resolve({ success: true, message: 'تم فتح المنفذ 3141 في جدار حماية ويندوز بنجاح!' });
+      }
+    });
+  });
+});
 
 // ─── Restart app (for backup restore) ──────────────────────────────────────────
 ipcMain.handle('app:restart', () => {
   app.relaunch();
   allowQuit = true;
   app.quit();
+});
+
+// ─── Filesystem Helpers ───────────────────────────────────────────────────────
+ipcMain.handle('fs:writeFile', async (_, filePath, base64Data) => {
+  try {
+    const buffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(filePath, buffer);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fs:readFile', async (_, filePath) => {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return { success: true, data: buffer.toString('base64') };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // ─── Get logo as file:// URL ───────────────────────────────────────────────────
@@ -324,6 +423,112 @@ ipcMain.handle('app:getLogoPath', (_, logoDbPath) => {
     return `file://${logoDbPath.replace(/\\/g, '/')}`;
   }
   return null;
+});
+
+// ─── Enumerate installed printers (with 2.5s timeout) ──────────────────────────
+ipcMain.handle('app:getPrinters', async (event) => {
+  try {
+    const win = (event && event.sender ? BrowserWindow.fromWebContents(event.sender) : null) || mainWindow;
+    if (!win || !win.webContents) return [];
+
+    const getPrintersPromise = win.webContents.getPrintersAsync
+      ? win.webContents.getPrintersAsync()
+      : Promise.resolve(win.webContents.getPrinters ? win.webContents.getPrinters() : []);
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('getPrinters timeout')), 2500)
+    );
+
+    const printers = await Promise.race([getPrintersPromise, timeoutPromise]);
+    return (printers || []).map(p => ({ name: p.name, isDefault: !!p.isDefault }));
+  } catch (e) {
+    console.warn('[Printers] getPrinters warning/timeout:', e.message);
+    try {
+      if (mainWindow && mainWindow.webContents.getPrinters) {
+        return (mainWindow.webContents.getPrinters() || []).map(p => ({ name: p.name, isDefault: !!p.isDefault }));
+      }
+    } catch (_) {}
+    return [];
+  }
+});
+
+// ─── Print label (silent) to a specific printer ─────────────────────────────
+// Uses a tiny dedicated window sized to the label (~30mm × 35mm ≈ 113×132px @96dpi)
+// so Chromium generates a print page matching the sticker, not the screen.
+ipcMain.handle('app:printLabel', async (_, { html, deviceName, copies }) => {
+  return new Promise((resolve) => {
+    try {
+      // 30mm ≈ 113px,  35mm ≈ 132px  at 96 DPI
+      const labelWin = new BrowserWindow({
+        width: 113,
+        height: 132,
+        show: false,
+        resizable: false,
+        backgroundColor: '#ffffff',
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          paintWhenInitiallyHidden: true
+        }
+      });
+
+      const wrapped = `<!DOCTYPE html>
+<html dir="ltr">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: 30mm 35mm; margin: 0 !important; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 30mm; height: 35mm;
+    margin: 0; padding: 0;
+    background: #fff; color: #000;
+    font-family: Arial, Tahoma, sans-serif;
+    overflow: hidden;
+    -webkit-print-color-adjust: exact;
+  }
+</style>
+</head>
+<body>${html}</body>
+</html>`;
+
+      labelWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(wrapped));
+
+      labelWin.webContents.once('did-finish-load', () => {
+        // Brief show to force Chromium to paint, then hide immediately
+        labelWin.showInactive();
+        labelWin.hide();
+
+        setTimeout(() => {
+          const printOpts = {
+            silent: true,
+            printBackground: true,
+            color: false,
+            copies: parseInt(copies, 10) || 1,
+            margins: { marginType: 'none' },
+            pageSize: { width: 30000, height: 35000 }   // microns: 30mm × 35mm
+          };
+          if (deviceName && deviceName.trim() !== '') {
+            printOpts.deviceName = deviceName.trim();
+          }
+          labelWin.webContents.print(printOpts, (success, errType) => {
+            try { labelWin.destroy(); } catch (_) {}
+            resolve({ success, error: errType });
+          });
+        }, 500);
+      });
+
+      // Safety timeout
+      setTimeout(() => {
+        try { labelWin.destroy(); } catch (_) {}
+        resolve({ success: false, error: 'timeout' });
+      }, 12000);
+
+    } catch (e) {
+      resolve({ success: false, error: e.message });
+    }
+  });
 });
 
 // ─── Helper: جلب إعدادات المحل من قاعدة البيانات ─────────────────────────────
@@ -399,6 +604,16 @@ ipcMain.handle('whatsapp:sendOrderReady', async (_, data) => {
   try {
     return await getActiveProvider().sendMessage({
       type: 'order_ready', phone: data.phone, payload: data, settings: getShopSettings(),
+    });
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// خرج للتوصيل
+ipcMain.handle('whatsapp:sendOutForDelivery', async (_, data) => {
+  if (!data.phone) return { success: false, error: 'لا يوجد رقم هاتف للعميل' };
+  try {
+    return await getActiveProvider().sendMessage({
+      type: 'out_for_delivery', phone: data.phone, payload: data, settings: getShopSettings(),
     });
   } catch (e) { return { success: false, error: e.message }; }
 });

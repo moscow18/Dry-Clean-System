@@ -2,30 +2,13 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — الحسابات والمالية</title>
+  <title>DRY CLEAN — الحسابات والمالية</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
-    .fin-layout { display: flex; height: 100vh; flex-direction: row-reverse; }
-    .fin-sidebar {
-      width: 200px;
-      background: var(--primary);
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      padding: 12px 0;
-      flex-shrink: 0;
-    }
-    .fin-sidebar-title { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.35); padding: 4px 14px 8px; }
-    .fin-nav-btn {
-      padding: 10px 14px; color: rgba(255,255,255,0.7); font-family: var(--font); font-size: 12px;
-      font-weight: 600; cursor: pointer; border: none; background: transparent; text-align: right;
-      width: 100%; border-right: 3px solid transparent; transition: all var(--transition);
-    }
-    .fin-nav-btn:hover { background: rgba(255,255,255,0.06); color: #fff; }
-    .fin-nav-btn.active { background: rgba(201,168,76,0.15); color: var(--accent); border-right-color: var(--accent); }
-    .fin-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .fin-body { flex: 1; overflow-y: auto; padding: 20px; }
+    .fin-layout { display: flex; height: 100vh; flex-direction: row-reverse; overflow: hidden; }
+    .fin-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+    .fin-body { flex: 1; overflow-y: auto; padding: 24px; }
     .section { display: none; }
     .section.active { display: block; }
     .treasury-box {
@@ -37,6 +20,7 @@
       display: flex;
       justify-content: space-around;
       align-items: center;
+      box-shadow: var(--shadow);
     }
     .treasury-box .t-item { text-align: center; }
     .treasury-box .t-amount { font-size: 28px; font-weight: 900; }
@@ -55,21 +39,65 @@
 <body>
 <div class="fin-layout">
 
-  <!-- Sidebar -->
-  <div class="fin-sidebar">
-    <div class="fin-sidebar-title">الحسابات والمالية</div>
-    <button class="fin-nav-btn active" onclick="showSection('expenses')">المصروفات</button>
-    <button class="fin-nav-btn" onclick="showSection('revenues')">الإيرادات الأخرى</button>
-    <button class="fin-nav-btn" onclick="showSection('treasury')">الخزينة</button>
-    <button class="fin-nav-btn" onclick="showSection('vodafone')">فودافون كاش</button>
-    <button class="fin-nav-btn" onclick="showSection('instapay')">إنستا باي</button>
-    <button class="fin-nav-btn" onclick="showSection('customers-accounts')">حسابات العملاء</button>
-    <button class="fin-nav-btn" onclick="showSection('suppliers-accounts')">حسابات الموردين</button>
-    <button class="fin-nav-btn" onclick="showSection('stats')">إحصائيات مهمة</button>
-    <div style="margin-top:auto;padding:12px 14px;border-top:1px solid rgba(255,255,255,0.08);">
-      <button class="btn" onclick="goBack()" style="width:100%;color:rgba(255,255,255,0.6);background:transparent;border:1px solid rgba(255,255,255,0.15);font-size:12px;">← رجوع</button>
+  <!-- Premier Finance Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon" id="sidebarLogoIcon">D</div>
+      <div>
+        <div class="logo-text" id="sidebarLogoText">DRY CLEAN</div>
+        <div class="logo-sub">الحسابات والمالية</div>
+      </div>
     </div>
-  </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">القائمة العامة</div>
+      <div class="sidebar-nav-item" onclick="goBack()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        الرئيسية
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">أقسام الحسابات</div>
+      <div class="sidebar-nav-item fin-nav-btn active" onclick="showSection('expenses')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        المصروفات
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('revenues')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        الإيرادات الأخرى
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('treasury')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
+        الخزينة
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('vodafone')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        فودافون كاش
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('instapay')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        إنستا باي
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('customers-accounts')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        حسابات العملاء
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('suppliers-accounts')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        حسابات الموردين
+      </div>
+      <div class="sidebar-nav-item fin-nav-btn" onclick="showSection('stats')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+        إحصائيات مهمة
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div id="sidebarShopName">Dry Clean</div>
+      <div>DRY CLEAN PRO © 2026</div>
+    </div>
+  </aside>
 
   <!-- Content -->
   <div class="fin-content">
@@ -119,10 +147,9 @@
               <div class="form-group">
                 <label class="form-label">المصدر</label>
                 <select id="exp_source" class="form-control">
-                  <option value="خزينة">الخزينة</option>
+                  <option value="خزينة">الخزينة (نقدي)</option>
                   <option value="فودافون كاش">فودافون كاش</option>
                   <option value="إنستا باي">إنستا باي</option>
-                  <option value="بنك">البنك</option>
                 </select>
               </div>
               <button class="btn btn-danger" onclick="saveExpense()">

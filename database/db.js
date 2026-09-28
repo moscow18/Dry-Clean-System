@@ -261,6 +261,141 @@ function migrateSchema() {
         runSafe("ALTER TABLE shifts ADD COLUMN instapay_cash_expected REAL DEFAULT 0");
         runSafe("ALTER TABLE shifts ADD COLUMN instapay_cash_actual REAL DEFAULT 0");
       }
+    },
+    {
+      version: 17,
+      run: () => {
+        // إضافة إعداد عرض عنوان العميل على الفاتورة
+        runSafe("ALTER TABLE company_settings ADD COLUMN show_customer_address INTEGER DEFAULT 0");
+      }
+    },
+    {
+      version: 18,
+      run: () => {
+        // إضافة حقل التوصيل على الفواتير
+        runSafe("ALTER TABLE invoices ADD COLUMN is_delivery INTEGER DEFAULT 0");
+      }
+    },
+    {
+      version: 19,
+      run: () => {
+        // إضافة طريقة دفع السلف
+        runSafe("ALTER TABLE advances ADD COLUMN payment_method TEXT DEFAULT 'الخزينة'");
+      }
+    },
+    {
+      version: 20,
+      run: () => {
+        // Express service (price x2) + driver on delivery invoices
+        runSafe("ALTER TABLE invoices ADD COLUMN is_express INTEGER DEFAULT 0");
+        runSafe("ALTER TABLE invoices ADD COLUMN driver_id INTEGER REFERENCES employees(id)");
+        runSafe("ALTER TABLE invoices ADD COLUMN delivered_at DATETIME");
+        // WhatsApp template for out-for-delivery
+        runSafe("ALTER TABLE company_settings ADD COLUMN wa_tpl_out_for_delivery TEXT DEFAULT ''");
+      }
+    },
+    {
+      version: 21,
+      run: () => {
+        // Track out for delivery timestamp
+        runSafe("ALTER TABLE invoices ADD COLUMN out_for_delivery_at DATETIME");
+      }
+    },
+    {
+      version: 22,
+      run: () => {
+        // Label printer: garment info per invoice
+        runSafe("ALTER TABLE invoices ADD COLUMN pieces_count INTEGER DEFAULT 1");
+        runSafe("ALTER TABLE invoices ADD COLUMN garment_type TEXT DEFAULT ''");
+        runSafe("ALTER TABLE invoices ADD COLUMN has_iron_mark INTEGER DEFAULT 0");
+        // Printer selection settings
+        runSafe("ALTER TABLE company_settings ADD COLUMN invoice_printer TEXT DEFAULT ''");
+        runSafe("ALTER TABLE company_settings ADD COLUMN label_printer TEXT DEFAULT ''");
+      }
+    },
+    {
+      version: 23,
+      run: () => {
+        runSafe("ALTER TABLE company_settings ADD COLUMN label_width INTEGER DEFAULT 38");
+        runSafe("ALTER TABLE company_settings ADD COLUMN label_height INTEGER DEFAULT 35");
+      }
+    },
+    {
+      version: 24,
+      run: () => {
+        // Bag tracking: count per invoice
+        runSafe("ALTER TABLE invoices ADD COLUMN bag_count INTEGER DEFAULT 0");
+        // Individual bag records with QR codes and print tracking
+        runSafe(`CREATE TABLE IF NOT EXISTS invoice_bags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+          bag_number INTEGER NOT NULL,
+          qr_code TEXT NOT NULL UNIQUE,
+          is_printed INTEGER DEFAULT 0,
+          printed_at DATETIME,
+          scanned_at DATETIME,
+          created_at DATETIME DEFAULT (datetime('now'))
+        )`);
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_invoice ON invoice_bags(invoice_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_qr ON invoice_bags(qr_code)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_unprinted ON invoice_bags(is_printed) WHERE is_printed = 0");
+        // Bag printer setting
+        runSafe("ALTER TABLE company_settings ADD COLUMN bag_printer TEXT DEFAULT ''");
+      }
+    },
+    {
+      version: 25,
+      run: () => {
+        // Rebuild invoice_bags with ON DELETE CASCADE
+        runSafe(`
+          CREATE TABLE IF NOT EXISTS invoice_bags_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+            bag_number INTEGER NOT NULL,
+            qr_code TEXT NOT NULL UNIQUE,
+            is_printed INTEGER DEFAULT 0,
+            printed_at DATETIME,
+            scanned_at DATETIME,
+            created_at DATETIME DEFAULT (datetime('now'))
+          )
+        `);
+        runSafe(`
+          INSERT INTO invoice_bags_new (id, invoice_id, bag_number, qr_code, is_printed, printed_at, scanned_at, created_at)
+          SELECT id, invoice_id, bag_number, qr_code, is_printed, printed_at, scanned_at, created_at FROM invoice_bags
+        `);
+        runSafe("DROP TABLE IF EXISTS invoice_bags");
+        runSafe("ALTER TABLE invoice_bags_new RENAME TO invoice_bags");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_invoice ON invoice_bags(invoice_id)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_qr ON invoice_bags(qr_code)");
+        runSafe("CREATE INDEX IF NOT EXISTS idx_invoice_bags_unprinted ON invoice_bags(is_printed) WHERE is_printed = 0");
+
+        // Rebuild returns with ON DELETE CASCADE
+        runSafe(`
+          CREATE TABLE IF NOT EXISTS returns_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_invoice_id INTEGER REFERENCES invoices(id) ON DELETE CASCADE,
+            employee_id INTEGER REFERENCES employees(id),
+            return_date TEXT DEFAULT (date('now')),
+            total_returned REAL DEFAULT 0,
+            notes TEXT,
+            shift_id INTEGER REFERENCES shifts(id),
+            created_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+        runSafe(`
+          INSERT INTO returns_new (id, original_invoice_id, employee_id, return_date, total_returned, notes, shift_id, created_at)
+          SELECT id, original_invoice_id, employee_id, return_date, total_returned, notes, shift_id, created_at FROM returns
+        `);
+        runSafe("DROP TABLE IF EXISTS returns");
+        runSafe("ALTER TABLE returns_new RENAME TO returns");
+      }
+    },
+    {
+      version: 26,
+      description: 'Add notes column to customers table for customer details and Excel import',
+      run: () => {
+        runSafe("ALTER TABLE customers ADD COLUMN notes TEXT DEFAULT ''");
+      }
     }
   ];
 
@@ -286,7 +421,7 @@ function runSeed() {
 
 // ─── Role checking helper ─────────────────────────────────────────────────────
 function requireAdmin() {
-  if (currentSession.role !== 'admin') {
+  if (currentSession.role === 'cashier') {
     throw new Error('ACCESS_DENIED: هذه العملية متاحة للمدير فقط');
   }
 }
@@ -689,6 +824,77 @@ function endShift(shiftId, actualCash, actualVodafone, actualInstapay, notes) {
   return { success: true, data: { cashDifference, vodafoneDifference: vodafoneDiff, instapayDifference: instapayDiff } };
 }
 
+// ─── Truncate Invoices & Finance Functions (Called from Reports) ──────────────
+function truncateInvoices() {
+  try {
+    const tx = db.transaction(() => {
+      // With ON DELETE CASCADE (migration v25), deleting invoices cascades to:
+      // invoice_bags, invoice_items, returns, return_items.
+      // We also explicitly delete children as bulletproof safeguard:
+      db.prepare('DELETE FROM return_items').run();
+      db.prepare('DELETE FROM returns').run();
+      db.prepare('DELETE FROM invoice_bags').run();
+      db.prepare('DELETE FROM invoice_items').run();
+      db.prepare('DELETE FROM invoices').run();
+      db.prepare('DELETE FROM invoice_sequence').run();
+      db.prepare("INSERT OR REPLACE INTO invoice_sequence (id, last_number, year) VALUES (1, 0, strftime('%Y', 'now'))").run();
+    });
+    tx();
+    return { success: true };
+  } catch (err) {
+    console.error('Error in truncateInvoices:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+function truncateFinance() {
+  try {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM expenses').run();
+      db.prepare('DELETE FROM revenues').run();
+      db.prepare('DELETE FROM salary_payments').run();
+      db.prepare('DELETE FROM treasury').run();
+      db.prepare(`INSERT INTO treasury (type, description, amount, balance_after, treasury_type) VALUES ('إيراد', 'رصيد افتتاحي', 0, 0, 'الخزينة')`).run();
+    });
+    tx();
+    return { success: true };
+  } catch (err) {
+    console.error('Error in truncateFinance:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+function batchUpsertCustomers(customersList) {
+  try {
+    let created = 0;
+    let updated = 0;
+    const findStmt = db.prepare('SELECT id, name, address, notes FROM customers WHERE phone = ? LIMIT 1');
+    const insertStmt = db.prepare('INSERT INTO customers (name, phone, address, opening_balance, current_balance, notes) VALUES (?, ?, ?, ?, ?, ?)');
+    const updateStmt = db.prepare('UPDATE customers SET name = ?, address = ?, notes = ? WHERE id = ?');
+
+    const tx = db.transaction((list) => {
+      for (const c of list) {
+        const existing = findStmt.get(c.phone);
+        if (existing) {
+          const updateAddress = c.address || existing.address;
+          const updateNotes = c.notes ? (existing.notes ? `${existing.notes} | ${c.notes}` : c.notes) : (existing.notes || '');
+          updateStmt.run(c.name, updateAddress, updateNotes, existing.id);
+          updated++;
+        } else {
+          insertStmt.run(c.name, c.phone, c.address, c.opening_balance || 0, c.current_balance || c.opening_balance || 0, c.notes || '');
+          created++;
+        }
+      }
+    });
+
+    tx(customersList);
+    return { success: true, created, updated };
+  } catch (err) {
+    console.error('Error in batchUpsertCustomers:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 // ─── Selective Reset ──────────────────────────────────────────────────────────
 // options: { keepCustomers, keepServices, keepEmployees, keepSettings }
 function selectiveReset(options = {}) {
@@ -705,7 +911,7 @@ function selectiveReset(options = {}) {
         const alwaysDelete = [
           'audit_log', 'login_sessions',
           'return_items', 'returns',
-          'invoice_items', 'invoices',
+          'invoice_bags', 'invoice_items', 'invoices',
           'attendance', 'leaves', 'advances', 'deductions',
           'incentives', 'custody', 'salary_payments',
           'expenses', 'revenues', 'treasury',
@@ -771,7 +977,7 @@ function selectiveReset(options = {}) {
         if (!keepSettings) {
           try {
             db.prepare(`UPDATE company_settings SET
-              company_name='EL-Tarzy', address='', phone='', logo_path=NULL,
+              company_name='Dry Clean', address='', phone='', logo_path=NULL,
               tax_number='', receipt_footer='شكراً لزيارتكم', receipt_notes='',
               show_tailor_name=1, show_customer_phone=1, currency='جنيه',
               prevent_cashier_price_edit=0,
@@ -901,12 +1107,12 @@ function getDailyReport(date) {
 
     // ── 1. Invoices created today ───────────────────────────────────────────────
     const invoices = db.prepare(`
-      SELECT i.*, c.name as customer_name, e.name as tailor_name,
+      SELECT i.*, c.name as customer_name, d.name as driver_name,
              COALESCE(i.amount_paid,0) as paid,
              COALESCE(i.remaining,0) as remaining_amount
       FROM invoices i 
       LEFT JOIN customers c ON i.customer_id = c.id
-      LEFT JOIN employees e ON i.tailor_id = e.id
+      LEFT JOIN employees d ON i.driver_id = d.id
       WHERE i.invoice_date LIKE ?
     `).all(dateLike);
 
@@ -1015,6 +1221,245 @@ function getDailyReport(date) {
   }
 }
 
+// ─── Bag Tracking helpers ─────────────────────────────────────────────────────
+function setBagCount(invoiceId, bagCount) {
+  const inv = db.prepare('SELECT invoice_number FROM invoices WHERE id = ?').get(invoiceId);
+  if (!inv) return { success: false, error: 'الفاتورة غير موجودة' };
+
+  const setBagTx = db.transaction(() => {
+    // Remove any existing bags for this invoice (in case of re-count)
+    db.prepare('DELETE FROM invoice_bags WHERE invoice_id = ?').run(invoiceId);
+    // Update bag count on invoice
+    db.prepare('UPDATE invoices SET bag_count = ? WHERE id = ?').run(bagCount, invoiceId);
+
+    const bags = [];
+    const insertStmt = db.prepare(`
+      INSERT INTO invoice_bags (invoice_id, bag_number, qr_code)
+      VALUES (?, ?, ?)
+    `);
+
+    // Extract year & sequence for pure numeric barcode
+    let yr = '26';
+    let seq = String(invoiceId).padStart(4, '0');
+    const invMatch = (inv.invoice_number || '').match(/(\d{4})[^\d]*(\d+)/);
+    if (invMatch) {
+      yr = invMatch[1].slice(-2);
+      seq = invMatch[2].padStart(4, '0');
+    } else {
+      const d = (inv.invoice_number || '').replace(/\D/g, '');
+      if (d.length >= 4) {
+        yr = d.slice(-4, -2) || '26';
+        seq = d.slice(-4).padStart(4, '0');
+      }
+    }
+
+    for (let i = 1; i <= bagCount; i++) {
+      // توليد رقم عشوائي بالكامل ومستقل لكل كيس على حدة (مختلف تماماً وغير متسلسل إطلاقاً)
+      let numBarcode;
+      while (true) {
+        numBarcode = String(Math.floor(10000000 + Math.random() * 90000000)); // 8 أرقام عشوائية تماماً
+        const exists = db.prepare('SELECT id FROM invoice_bags WHERE qr_code = ?').get(numBarcode);
+        if (!exists) break;
+      }
+      const info = insertStmt.run(invoiceId, i, numBarcode);
+      bags.push({ id: Number(info.lastInsertRowid), bagNumber: i, qrCode: numBarcode });
+    }
+    return bags;
+  });
+
+  try {
+    const bags = setBagTx();
+    return { success: true, data: { invoiceId, invoiceNumber: inv.invoice_number, bagCount, bags } };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function normalizeScannerCode(raw) {
+  if (!raw) return '';
+  let code = String(raw).trim().replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+
+  // Shifted & unshifted Arabic keyboard mapping -> English QWERTY
+  const map = {
+    // Shifted Arabic keys (when Shift / CapsLock is active on Arabic layout)
+    '÷': 'I', 'آ': 'N', '{': 'V', '}': 'V',
+    'لآ': 'B', 'ِ': 'A', 'ٍ': 'S', 'لأ': 'G', 'أ': 'H', 'ـ': 'J', '،': 'K',
+    '‘': 'Q', '”': 'W', 'ُ': 'E', 'إ': 'T',
+    // Unshifted Arabic keys
+    'ض':'Q','ص':'W','ث':'E','ق':'R','ف':'T','غ':'Y','ع':'U','ه':'I','خ':'O','ح':'P','ج':'[','د':']',
+    'ش':'A','س':'S','ي':'D','ب':'F','ل':'G','ا':'H','ت':'J','ن':'K','م':'L','ك':';','ط':"'",
+    'ئ':'Z','ء':'X','ؤ':'C','ر':'V','لا':'B','ى':'N','ة':'M','و':',','ز':'.','ظ':'/'
+  };
+
+  let out = '';
+  for (let i = 0; i < code.length; i++) {
+    const two = code.substr(i, 2);
+    if (map[two]) {
+      out += map[two];
+      i++;
+    } else if (map[code[i]]) {
+      out += map[code[i]];
+    } else {
+      out += code[i];
+    }
+  }
+
+  return out.toUpperCase().trim();
+}
+
+function confirmBagScan(qrCode) {
+  try {
+    const raw = String(qrCode || '').trim();
+    if (!raw) return { success: false, error: 'الرمز المدخل فارغ' };
+
+    const normalized = normalizeScannerCode(raw);
+
+    // 1) المطابقة المباشرة للكود الخام أو الكود المعالج
+    let bag = db.prepare('SELECT * FROM invoice_bags WHERE qr_code = ? OR UPPER(qr_code) = ?').get(raw, normalized);
+
+    // 2) مطابقة الأرقام النقية المكونة من 10 أرقام (سنة + رقم فاتورة + رقم كيس: مثال 2026001502)
+    if (!bag) {
+      const m1 = normalized.match(/^(\d{4})[-]?(\d{4})[-]?(\d{2})$/);
+      if (m1) {
+        const seq = m1[2];
+        const bgNum = parseInt(m1[3], 10);
+        bag = db.prepare(`
+          SELECT b.* FROM invoice_bags b
+          JOIN invoices i ON b.invoice_id = i.id
+          WHERE i.invoice_number LIKE ? AND b.bag_number = ?
+        `).get(`%${seq}%`, bgNum);
+      }
+    }
+
+    // 3) مطابقة الإدخال اليدوي المختصر السريع (رقم الفاتورة - رقم الكيس: مثال 15-2 أو 0015-2)
+    if (!bag) {
+      const m2 = normalized.match(/^(\d+)[-](\d+)$/);
+      if (m2) {
+        const seq = m2[1].padStart(4, '0');
+        const bgNum = parseInt(m2[2], 10);
+        bag = db.prepare(`
+          SELECT b.* FROM invoice_bags b
+          JOIN invoices i ON b.invoice_id = i.id
+          WHERE (i.invoice_number LIKE ? OR i.id = ?) AND b.bag_number = ?
+        `).get(`%${seq}%`, parseInt(m2[1], 10), bgNum);
+      }
+    }
+
+    // 4) المطابقة مع تجاهل الفواصل والشرطات
+    if (!bag) {
+      const stripped = normalized.replace(/[-_\s]/g, '');
+      bag = db.prepare(`
+        SELECT * FROM invoice_bags
+        WHERE REPLACE(REPLACE(REPLACE(UPPER(qr_code), '-', ''), '_', ''), ' ', '') = ?
+      `).get(stripped);
+    }
+
+    // 5) لو أدخل رقم الفاتورة فقط وكانت الفاتورة تحتوي على كيس واحد فقط (مثال: 15 أو INV-2026-0015)
+    if (!bag) {
+      const invMatch = normalized.match(/(?:INV-)?(\d{4}-\d+|\d+)/i);
+      if (invMatch) {
+        const term = invMatch[1].padStart(4, '0');
+        bag = db.prepare(`
+          SELECT b.* FROM invoice_bags b
+          JOIN invoices i ON b.invoice_id = i.id
+          WHERE (i.invoice_number LIKE ? OR i.id = ?) AND i.bag_count = 1
+        `).get(`%${term}%`, parseInt(invMatch[1], 10) || 0);
+      }
+    }
+
+    if (!bag) {
+      return {
+        success: false,
+        error: `رمز الباركود (${raw}) غير مسجل في أكياس النظام — يمكنك كتابة رقم الفاتورة والكيس يدوياً (مثال: 15-1)`
+      };
+    }
+
+    if (bag.scanned_at) {
+      // Already scanned — return info but flag it
+      const inv = db.prepare('SELECT invoice_number FROM invoices WHERE id = ?').get(bag.invoice_id);
+      return { success: true, data: { alreadyScanned: true, invoiceId: bag.invoice_id, invoiceNumber: inv?.invoice_number, bagNumber: bag.bag_number } };
+    }
+
+    const now = getLocalISOString();
+    db.prepare('UPDATE invoice_bags SET scanned_at = ? WHERE id = ?').run(now, bag.id);
+
+    const inv = db.prepare('SELECT invoice_number, bag_count FROM invoices WHERE id = ?').get(bag.invoice_id);
+    const scannedCount = db.prepare('SELECT COUNT(*) as cnt FROM invoice_bags WHERE invoice_id = ? AND scanned_at IS NOT NULL').get(bag.invoice_id).cnt;
+
+    return {
+      success: true,
+      data: {
+        alreadyScanned: false,
+        invoiceId: bag.invoice_id,
+        invoiceNumber: inv?.invoice_number,
+        bagNumber: bag.bag_number,
+        totalBags: inv?.bag_count || 0,
+        scannedCount
+      }
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function getInvoiceBags(invoiceId) {
+  try {
+    const bags = db.prepare('SELECT * FROM invoice_bags WHERE invoice_id = ? ORDER BY bag_number').all(invoiceId);
+    return { success: true, data: bags };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function getUnprintedBags() {
+  try {
+    const bags = db.prepare(`
+      SELECT b.id, b.invoice_id, b.bag_number, b.qr_code, b.created_at,
+             i.invoice_number, i.bag_count, i.pieces_count, i.garment_type, i.is_delivery, i.is_express,
+             c.name as customer_name
+      FROM invoice_bags b
+      JOIN invoices i ON b.invoice_id = i.id
+      LEFT JOIN customers c ON i.customer_id = c.id
+      WHERE b.is_printed = 0
+      ORDER BY b.invoice_id ASC, b.bag_number ASC
+    `).all();
+    return { success: true, data: bags };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function markBagsPrinted(bagIds = []) {
+  try {
+    if (!bagIds || bagIds.length === 0) return { success: true, count: 0 };
+    const now = getLocalISOString();
+    const placeholders = bagIds.map(() => '?').join(',');
+    const info = db.prepare(`
+      UPDATE invoice_bags
+      SET is_printed = 1, printed_at = ?
+      WHERE id IN (${placeholders})
+    `).run(now, ...bagIds);
+    return { success: true, count: info.changes };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function markInvoiceBagsPrinted(invoiceId) {
+  try {
+    if (!invoiceId) return { success: true, count: 0 };
+    const now = getLocalISOString();
+    const info = db.prepare(`
+      UPDATE invoice_bags
+      SET is_printed = 1, printed_at = ?
+      WHERE invoice_id = ?
+    `).run(now, invoiceId);
+    return { success: true, count: info.changes };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ─── IPC Handler Map ──────────────────────────────────────────────────────────
 function setupIpcHandlers(ipcMain, app) {
   getDb(app);
@@ -1022,6 +1467,11 @@ function setupIpcHandlers(ipcMain, app) {
   // ─── Auth ─────────────────────────────────────────────────────────────────
   ipcMain.handle('auth:login', (_, username, password) => {
     try {
+      const { getActivationStatus } = require('../activation');
+      const act = getActivationStatus();
+      if (!act.activated) {
+        return { success: false, error: 'النظام غير مفعّل. يرجى تفعيل البرنامج أولاً للاستخدام.' };
+      }
       return authenticateUser(username, password);
     } catch (err) {
       return { success: false, error: err.message };
@@ -1187,21 +1637,41 @@ function setupIpcHandlers(ipcMain, app) {
         } else {
           invNum = generateInvoiceNumber();
         }
+        // ── تحديد payment_method الصحيح من treasury_type ──────────────────────
+        // الأولوية: لو payment_method مرسل وقيمته صحيحة نستخدمه
+        // وإلا نشتق من treasury_type
+        let resolvedPaymentMethod;
+        const isDeferred = (invoiceData.remaining || 0) > 0 && (invoiceData.amount_paid || 0) === 0;
+        const treasuryTyp = invoiceData.treasury_type || 'الخزينة';
+        if (isDeferred) {
+          resolvedPaymentMethod = 'آجل';
+        } else if (treasuryTyp === 'فودافون كاش') {
+          resolvedPaymentMethod = 'فودافون كاش';
+        } else if (treasuryTyp === 'إنستا باي') {
+          resolvedPaymentMethod = 'إنستا باي';
+        } else {
+          resolvedPaymentMethod = 'نقدي';
+        }
+
+        // ── تحديد حالة الفاتورة ────────────────────────────────────────────────
+        const invoiceStatus = invoiceData.status || 'تحت الشغل';
+
         const invStmt = db.prepare(`
           INSERT INTO invoices (invoice_number, customer_id, employee_id, tailor_id, invoice_date,
             payment_method, invoice_type, treasury_type, subtotal, discount_percent,
-            discount_amount, net_total, amount_paid, remaining, notes, shift_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            discount_amount, net_total, amount_paid, remaining, notes, shift_id, status, is_delivery,
+            is_express, driver_id, pieces_count, garment_type, has_iron_mark)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const invInfo = invStmt.run(
           invNum,
           invoiceData.customer_id || null,
           invoiceData.employee_id || null,
-          invoiceData.tailor_id || null,
+          null, // tailor_id removed
           invoiceData.invoice_date || getBusinessDate(),
-          invoiceData.payment_method || 'نقدي',
+          resolvedPaymentMethod,
           invoiceData.invoice_type || null,
-          invoiceData.treasury_type || 'الخزينة',
+          treasuryTyp,
           invoiceData.subtotal || 0,
           invoiceData.discount_percent || 0,
           invoiceData.discount_amount || 0,
@@ -1209,7 +1679,14 @@ function setupIpcHandlers(ipcMain, app) {
           invoiceData.amount_paid || 0,
           invoiceData.remaining || 0,
           invoiceData.notes || null,
-          currentSession.shiftId || invoiceData.shift_id || null
+          currentSession.shiftId || invoiceData.shift_id || null,
+          invoiceStatus,
+          invoiceData.is_delivery ? 1 : 0,
+          invoiceData.is_express ? 1 : 0,
+          invoiceData.driver_id || null,
+          invoiceData.pieces_count || 1,
+          invoiceData.garment_type || '',
+          invoiceData.has_iron_mark ? 1 : 0
         );
         const invoiceId = invInfo.lastInsertRowid;
 
@@ -1232,16 +1709,16 @@ function setupIpcHandlers(ipcMain, app) {
           );
         }
 
-        // Update customer balance if credit (أجل)
-        if (invoiceData.customer_id && invoiceData.payment_method === 'أجل') {
+        // Update customer balance if credit (آجل)
+        if (invoiceData.customer_id && resolvedPaymentMethod === 'آجل') {
           db.prepare(`UPDATE customers SET current_balance = current_balance + ? WHERE id = ?`)
             .run(invoiceData.remaining || 0, invoiceData.customer_id);
         }
 
         // Add treasury entry for cash payment
-        if (invoiceData.amount_paid > 0) {
+        if ((invoiceData.amount_paid || 0) > 0) {
           addTreasuryEntry('إيراد', `فاتورة رقم ${invNum}`,
-            invoiceData.amount_paid, invoiceData.treasury_type || 'الخزينة');
+            invoiceData.amount_paid, treasuryTyp);
         }
 
         return { invoiceId, invoiceNumber: invNum };
@@ -1414,13 +1891,48 @@ function setupIpcHandlers(ipcMain, app) {
   });
 
   // ─── Update Invoice Status ──────────────────────────────────────────────────
-  ipcMain.handle('db:updateInvoiceStatus', (_, invoiceId, status) => {
+  ipcMain.handle('db:updateInvoiceStatus', (_, invoiceId, status, driverId = null) => {
     try {
-      db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, invoiceId);
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      const localNow = new Date(now.getTime() - offset).toISOString().slice(0, 19);
+
+      if (status === 'تم التسليم') {
+        db.prepare('UPDATE invoices SET status = ?, delivered_at = ? WHERE id = ?').run(status, localNow, invoiceId);
+      } else if (status === 'خرج للتوصيل') {
+        if (driverId) {
+          db.prepare('UPDATE invoices SET status = ?, is_delivery = 1, driver_id = ?, out_for_delivery_at = ? WHERE id = ?').run(status, driverId, localNow, invoiceId);
+        } else {
+          db.prepare('UPDATE invoices SET status = ?, is_delivery = 1, out_for_delivery_at = ? WHERE id = ?').run(status, localNow, invoiceId);
+        }
+      } else {
+        db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, invoiceId);
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  // ─── Bag Tracking ───────────────────────────────────────────────────────────
+  ipcMain.handle('db:setBagCount', (_, invoiceId, bagCount) => {
+    return setBagCount(invoiceId, bagCount);
+  });
+
+  ipcMain.handle('db:confirmBagScan', (_, qrCode) => {
+    return confirmBagScan(qrCode);
+  });
+
+  ipcMain.handle('db:getInvoiceBags', (_, invoiceId) => {
+    return getInvoiceBags(invoiceId);
+  });
+
+  ipcMain.handle('db:getUnprintedBags', () => {
+    return getUnprintedBags();
+  });
+
+  ipcMain.handle('db:markBagsPrinted', (_, bagIds) => {
+    return markBagsPrinted(bagIds);
   });
 
   // ─── Salary payment (transaction) ─────────────────────────────────────────
@@ -1546,7 +2058,8 @@ function setupIpcHandlers(ipcMain, app) {
 
   ipcMain.handle('db:updateSettings', (_, data) => {
     try {
-      requireAdmin();
+      try { db.exec("ALTER TABLE company_settings ADD COLUMN label_width INTEGER DEFAULT 38"); } catch (_) {}
+      try { db.exec("ALTER TABLE company_settings ADD COLUMN label_height INTEGER DEFAULT 35"); } catch (_) {}
       db.prepare(`
         UPDATE company_settings SET
           company_name = ?, address = ?, phone = ?, logo_path = ?,
@@ -1560,7 +2073,14 @@ function setupIpcHandlers(ipcMain, app) {
           wa_tpl_full_payment = ?, wa_tpl_partial_payment = ?,
           admin_wa_phone = ?,
           report_save_path = ?,
-          day_cutoff_hour = ?
+          day_cutoff_hour = ?,
+          show_customer_address = ?,
+          wa_tpl_out_for_delivery = ?,
+          invoice_printer = ?,
+          label_printer = ?,
+          label_width = ?,
+          label_height = ?,
+          bag_printer = ?
         WHERE id = 1
       `).run(
         data.company_name, data.address, data.phone, data.logo_path || null,
@@ -1583,11 +2103,19 @@ function setupIpcHandlers(ipcMain, app) {
         data.wa_tpl_partial_payment || '',
         data.admin_wa_phone || '',
         data.report_save_path || '',
-        parseInt(data.day_cutoff_hour || 0, 10)
+        parseInt(data.day_cutoff_hour || 0, 10),
+        data.show_customer_address ? 1 : 0,
+        data.wa_tpl_out_for_delivery || '',
+        data.invoice_printer || '',
+        data.label_printer || '',
+        parseInt(data.label_width, 10) || 38,
+        parseInt(data.label_height, 10) || 35,
+        data.bag_printer || ''
       );
       logAudit('update_settings', 'company_settings', 1, null, data);
       return { success: true };
     } catch (err) {
+      console.error('[DB] updateSettings error:', err);
       return { success: false, error: err.message };
     }
   });
@@ -1719,9 +2247,38 @@ function setupIpcHandlers(ipcMain, app) {
     }
   });
 
+  // ─── Batch Upsert Customers (Excel Import) ────────────────────────────────
+  ipcMain.handle('db:batchUpsertCustomers', (_, list) => {
+    try {
+      return batchUpsertCustomers(list);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ─── Truncate Operations (from Reports) ──────────────────────────────────
+  ipcMain.handle('db:truncateInvoices', () => {
+    try {
+      requireAdmin();
+      return truncateInvoices();
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('db:truncateFinance', () => {
+    try {
+      requireAdmin();
+      return truncateFinance();
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // ─── Selective Reset ──────────────────────────────────────────────────────
   ipcMain.handle('db:selectiveReset', (_, options) => {
     try {
+      requireAdmin();
       return selectiveReset(options);
     } catch (err) {
       return { success: false, error: err.message };
@@ -1749,6 +2306,57 @@ function setupIpcHandlers(ipcMain, app) {
       }
     }
   });
+
+  // ─── Auto Absence ─────────────────────────────────────────────────────────
+  // يُطبَّق غياب تلقائي لكل موظف نشط ليس له حضور أو إجازة في التاريخ المحدد
+  ipcMain.handle('hr:applyAutoAbsence', (_, date) => {
+    try {
+      const targetDate = date || getBusinessDate();
+      const employees = db.prepare(`SELECT id FROM employees WHERE is_active = 1`).all();
+      let count = 0;
+      for (const emp of employees) {
+        // تحقق من وجود حضور
+        const att = db.prepare(
+          `SELECT id FROM attendance WHERE employee_id = ? AND date = ?`
+        ).get(emp.id, targetDate);
+        // تحقق من وجود إجازة
+        const lv = db.prepare(
+          `SELECT id FROM leaves WHERE employee_id = ? AND leave_date = ?`
+        ).get(emp.id, targetDate);
+
+        if (!att && !lv) {
+          // لا يوجد حضور ولا إجازة → غياب
+          db.prepare(`
+            INSERT OR IGNORE INTO attendance (employee_id, date, status)
+            VALUES (?, ?, 'غياب')
+          `).run(emp.id, targetDate);
+          count++;
+        }
+      }
+      return { success: true, data: { date: targetDate, absencesInserted: count } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 }
 
-module.exports = { getDb, setupIpcHandlers, generateInvoiceNumber, addTreasuryEntry, getTreasuryBalance, createBackup, copyBackupToExternal, getExternalBackupPath, selectiveReset };
+module.exports = {
+  getDb,
+  setupIpcHandlers,
+  generateInvoiceNumber,
+  addTreasuryEntry,
+  getTreasuryBalance,
+  createBackup,
+  copyBackupToExternal,
+  getExternalBackupPath,
+  selectiveReset,
+  truncateInvoices,
+  truncateFinance,
+  setBagCount,
+  confirmBagScan,
+  getInvoiceBags,
+  getUnprintedBags,
+  markBagsPrinted,
+  markInvoiceBagsPrinted,
+  batchUpsertCustomers
+};

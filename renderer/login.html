@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EL-TARZY — تسجيل الدخول</title>
+  <title>DRY CLEAN — تسجيل الدخول</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <style>
     body {
-      background: linear-gradient(135deg, #0F1729 0%, #1B2A4A 40%, #243560 100%);
+      background: radial-gradient(circle at 50% 15%, #1c0e10 0%, #111215 50%, #08090a 100%);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -52,7 +52,7 @@
     .login-logo-icon {
       width: 80px;
       height: 80px;
-      background: linear-gradient(135deg, var(--accent), #B8963E);
+      background: linear-gradient(135deg, #DC2626, #991B1B);
       border-radius: 20px;
       display: flex;
       align-items: center;
@@ -60,7 +60,7 @@
       font-size: 40px;
       font-weight: 900;
       color: #fff;
-      box-shadow: 0 8px 32px rgba(201,168,76,0.35);
+      box-shadow: 0 8px 32px rgba(220, 38, 38, 0.4);
       animation: logoGlow 3s ease-in-out infinite;
     }
 
@@ -69,12 +69,12 @@
       height: 80px;
       border-radius: 20px;
       object-fit: cover;
-      box-shadow: 0 8px 32px rgba(201,168,76,0.35);
+      box-shadow: 0 8px 32px rgba(220, 38, 38, 0.4);
     }
 
     @keyframes logoGlow {
-      0%, 100% { box-shadow: 0 8px 32px rgba(201,168,76,0.35); }
-      50% { box-shadow: 0 8px 48px rgba(201,168,76,0.55); }
+      0%, 100% { box-shadow: 0 8px 32px rgba(220, 38, 38, 0.4); }
+      50% { box-shadow: 0 8px 48px rgba(220, 38, 38, 0.6); }
     }
 
     .login-title {
@@ -136,7 +136,7 @@
     .login-field input:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 4px rgba(201,168,76,0.15);
+      box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.15);
     }
 
     .login-field input.error {
@@ -147,7 +147,7 @@
     .login-btn {
       width: 100%;
       height: 48px;
-      background: linear-gradient(135deg, var(--accent), #B8963E);
+      background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
       border: none;
       border-radius: 10px;
       color: #fff;
@@ -165,7 +165,7 @@
 
     .login-btn:hover {
       transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(201,168,76,0.4);
+      box-shadow: 0 8px 24px rgba(220, 38, 38, 0.4);
     }
 
     .login-btn:active {
@@ -257,9 +257,9 @@
 
   <!-- Logo -->
   <div class="login-logo">
-    <div class="login-logo-icon" id="logoIcon">T</div>
-    <div class="login-title" id="loginTitle">EL-TARZY</div>
-    <div class="login-subtitle">نظام إدارة محل الترزي</div>
+    <div class="login-logo-icon" id="logoIcon">D</div>
+    <div class="login-title" id="loginTitle">DRY CLEAN</div>
+    <div class="login-subtitle">نظام إدارة الدراي كلين والعناية بالملابس</div>
   </div>
 
   <!-- Login Card -->
@@ -293,7 +293,7 @@
 
   <!-- Footer -->
   <div class="login-footer">
-    EL-TARZY — Dev Blue Tech © 2026
+    DRY CLEAN PRO — Dev Blue Tech © 2026
     <div class="login-version" id="appVersion"></div>
   </div>
 </div>
@@ -442,40 +442,15 @@ function closeQuitModal() {
 async function checkActivation() {
   try {
     const status = await window.activation.getStatus();
-    if (status.activated) return true; // مفعّل، تمام
-    if (status.trialExpired) {
-      // الفترة التجريبية انتهت — حوّله لصفحة التفعيل
-      document.body.innerHTML = `
-        <div style="position:fixed;inset:0;background:linear-gradient(135deg,#0F1729,#1B2A4A);display:flex;align-items:center;justify-content:center;font-family:'Cairo',sans-serif;">
-          <div style="background:rgba(255,255,255,0.95);border-radius:20px;padding:48px 40px;max-width:460px;width:90%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.4);">
-            <div style="font-size:56px;margin-bottom:16px;">🔒</div>
-            <h2 style="color:#1B2A4A;font-size:22px;margin-bottom:10px;font-weight:900;">النظام غير مفعل</h2>
-            <p style="color:#64748B;font-size:14px;line-height:1.7;margin-bottom:24px;">
-              لقد انتهت مدة الاشتراك أو أن النظام غير مفعل.<br>
-              يرجى تفعيل البرنامج للاستمرار في الاستخدام.
-            </p>
-            <button onclick="window.electron.navigate('activation.html')" 
-              style="background:linear-gradient(135deg,#C9A84C,#B8963E);color:#fff;border:none;border-radius:12px;padding:14px 40px;font-size:16px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif;box-shadow:0 4px 20px rgba(201,168,76,0.4);">
-              تفعيل البرنامج الآن
-            </button>
-          </div>
-        </div>`;
-      return false;
-    }
-    // لسه في أيام متبقية — اعرض رسالة تحذير
-    if (status.daysLeft <= 3) {
-      const loginError = document.getElementById('loginError');
-      if (loginError) {
-        loginError.textContent = `⚠️ الفترة التجريبية تنتهي خلال ${status.daysLeft} ${status.daysLeft === 1 ? 'يوم' : 'أيام'}`;
-        loginError.style.display = 'block';
-        loginError.style.background = '#fef3c7';
-        loginError.style.color = '#92400e';
-      }
-    }
-    return true;
+    if (status && status.activated) return true; // مفعّل، تمام
+
+    // النظام غير مفعل — توجيه مباشر وفوري لصفحة التفعيل
+    window.electron.navigate('activation.html');
+    return false;
   } catch (e) {
     console.error('Activation check failed:', e);
-    return true; // لو فيه خطأ، اسمح بالدخول (fail-open)
+    window.electron.navigate('activation.html');
+    return false; // إغلاق صارم لمنع الدخول
   }
 }
 

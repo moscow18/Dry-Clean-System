@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — إدارة العملاء</title>
+  <title>DRY CLEAN — إدارة العملاء</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -45,11 +45,19 @@
           <div style="font-size:12px;color:var(--text-muted);" id="customersCount">0 عميل</div>
         </div>
         <div class="flex gap-3 items-center">
-          <div class="search-bar" style="width:280px;">
-            <input type="text" id="customerSearch" placeholder="بحث باسم العميل أو التليفون..." oninput="renderCustomersTable()" />
+          <div class="search-bar" style="width:260px;">
+            <input type="text" id="customerSearch" placeholder="بحث باسم العميل أو التليفون..." />
             <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
-          <button class="btn btn-success" onclick="openCustomerModal()">+ عميل جديد</button>
+          <button class="btn btn-outline" onclick="exportCustomersToExcel()" style="display:flex;align-items:center;gap:6px;" title="تصدير جميع العملاء إلى ملف Excel">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            تصدير Excel
+          </button>
+          <button class="btn btn-outline" onclick="importCustomersFromExcel()" style="display:flex;align-items:center;gap:6px;" title="استيراد عملاء من ملف Excel">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            استيراد Excel
+          </button>
+          <button class="btn btn-accent" onclick="openCustomerModal()">+ عميل جديد</button>
         </div>
       </div>
 
@@ -116,202 +124,6 @@
   </div>
 </div>
 
-<script>
-let allCustomers = [];
-
-function goBack(){ window.electron.navigate('main-dashboard.html'); }
-
-function showToast(msg,type='success'){
-  const c=document.getElementById('toastContainer');
-  const t=document.createElement('div');
-  t.className=`toast toast-${type}`;
-  t.innerHTML=`<span>${type==='success'?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>':type==='error'?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>':'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 9v2m0 4h.01M12 3l9 16H3L12 3z"/></svg>'}</span> ${msg}`;
-  c.appendChild(t);
-  setTimeout(()=>{t.style.animation='toastOut 0.3s ease forwards';setTimeout(()=>t.remove(),300);},3000);
-}
-
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function fmt(n){ return Number(n||0).toFixed(2); }
-
-// ─── Customers ─────────────────────────────────────────────────────────────────
-async function loadCustomers() {
-  const res = await window.db.query('SELECT * FROM customers ORDER BY id DESC',[]);
-  if(res.success){
-    allCustomers = res.data;
-    renderCustomersTable();
-  } else {
-    showToast('حدث خطأ أثناء تحميل العملاء', 'error');
-  }
-}
-
-function renderCustomersTable() {
-  const tbody = document.getElementById('customersBody');
-  const query = document.getElementById('customerSearch').value.trim().toLowerCase();
-  
-  let filtered = allCustomers;
-  
-  if(query){
-    filtered = filtered.filter(c => 
-      c.name.toLowerCase().includes(query) || 
-      (c.phone && c.phone.toLowerCase().includes(query))
-    );
-  }
-  
-  document.getElementById('customersCount').textContent = `${filtered.length} عميل`;
-  
-  if(!filtered.length){
-    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">لا يوجد عملاء مطابقين للبحث</td></tr>';
-    return;
-  }
-  
-  tbody.innerHTML = filtered.map((c,i) => `
-    <tr>
-      <td style="color:var(--text-muted);">${i+1}</td>
-      <td style="font-weight:700;">${c.name}</td>
-      <td><span style="font-family:monospace;">${c.phone||'—'}</span></td>
-      <td>${c.address||'—'}</td>
-      <td style="color:var(--text-muted);">${fmt(c.opening_balance)}</td>
-      <td style="font-weight:700; color:${c.current_balance < 0 ? 'var(--success)' : c.current_balance > 0 ? 'var(--danger)' : 'var(--primary)'};">${fmt(c.current_balance)}</td>
-      <td style="text-align:center;">
-        <div class="flex gap-2 justify-center">
-          <button class="btn btn-sm btn-outline" onclick="editCustomer(${c.id})">تعديل</button>
-          <button class="btn btn-sm" style="background:#25D366;color:#fff;border:none;display:flex;align-items:center;justify-content:center;padding:0 8px;" onclick="openWhatsApp('${c.phone||''}')" title="واتساب">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
-          </button>
-          <button class="btn btn-sm btn-danger" onclick="deleteCustomer(${c.id})">حذف</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function openCustomerModal() {
-  document.getElementById('customerModalTitle').textContent = 'إضافة عميل جديد';
-  document.getElementById('custId').value = '';
-  document.getElementById('custName').value = '';
-  document.getElementById('custPhone').value = '';
-  document.getElementById('custAddress').value = '';
-  document.getElementById('custOpeningBalance').value = '0';
-  document.getElementById('custOpeningBalance').disabled = false;
-  openModal('customerModal');
-}
-
-async function saveCustomer() {
-  const id = document.getElementById('custId').value;
-  const name = document.getElementById('custName').value.trim();
-  const phone = document.getElementById('custPhone').value.trim() || null;
-  const address = document.getElementById('custAddress').value.trim() || null;
-  const openingBalance = parseFloat(document.getElementById('custOpeningBalance').value) || 0;
-  
-  if(!name){
-    showToast('يرجى إدخال اسم العميل','error');
-    return;
-  }
-
-  // التحقق من عدم تكرار رقم التليفون
-  if (phone) {
-    const checkPhone = await window.db.queryOne(
-      `SELECT id, name FROM customers WHERE phone=? AND id != ? LIMIT 1`,
-      [phone, id || 0]
-    );
-    if (checkPhone.success && checkPhone.data) {
-      showToast(`رقم التليفون "${phone}" مسجل مسبقاً للعميل: ${checkPhone.data.name}`, 'error');
-      return;
-    }
-  }
-  
-  let res;
-  if(id){
-    // Update existing customer
-    // We need to fetch the old opening_balance to adjust the current_balance properly
-    const oldRes = await window.db.queryOne('SELECT opening_balance, current_balance FROM customers WHERE id=?', [id]);
-    if (oldRes.success && oldRes.data) {
-      const oldOpening = oldRes.data.opening_balance;
-      const oldCurrent = oldRes.data.current_balance;
-      const difference = openingBalance - oldOpening;
-      const newCurrent = oldCurrent + difference;
-      
-      res = await window.db.run(
-        'UPDATE customers SET name=?, phone=?, address=?, opening_balance=?, current_balance=? WHERE id=?',
-        [name, phone, address, openingBalance, newCurrent, id]
-      );
-    } else {
-      showToast('خطأ في استرجاع بيانات العميل القديمة', 'error');
-      return;
-    }
-  } else {
-    // Insert new customer
-    res = await window.db.run(
-      'INSERT INTO customers (name, phone, address, opening_balance, current_balance) VALUES (?,?,?,?,?)',
-      [name, phone, address, openingBalance, openingBalance]
-    );
-  }
-  
-  if(res.success){
-    showToast('تم الحفظ بنجاح ','success');
-    closeModal('customerModal');
-    await loadCustomers();
-  } else {
-    showToast('خطأ: '+res.error,'error');
-  }
-}
-
-function editCustomer(id) {
-  const c = allCustomers.find(x=>x.id===id);
-  if(!c) return;
-  document.getElementById('customerModalTitle').textContent = 'تعديل بيانات العميل';
-  document.getElementById('custId').value = c.id;
-  document.getElementById('custName').value = c.name;
-  document.getElementById('custPhone').value = c.phone || '';
-  document.getElementById('custAddress').value = c.address || '';
-  document.getElementById('custOpeningBalance').value = c.opening_balance || 0;
-  // If the user has invoices, maybe we shouldn't lock opening balance but let them know it affects current balance.
-  openModal('customerModal');
-}
-
-async function deleteCustomer(id) {
-  if(!confirm('هل أنت متأكد من حذف هذا العميل؟')) return;
-  
-  // Check if customer has associated invoices
-  const checkRes = await window.db.queryOne('SELECT COUNT(*) as count FROM invoices WHERE customer_id=?', [id]);
-  if (checkRes.success && checkRes.data && checkRes.data.count > 0) {
-    showToast('لا يمكن حذف هذا العميل لوجود فواتير مسجلة باسمه. يمكنك تعديل بياناته بدلاً من حذفه.', 'error');
-    return;
-  }
-  
-  const res = await window.db.run('DELETE FROM customers WHERE id=?',[id]);
-  if (res.success) {
-    showToast('تم الحذف','success');
-    await loadCustomers();
-  } else {
-    // If foreign key constraint failed
-    if (res.error && res.error.includes('FOREIGN KEY constraint failed')) {
-      showToast('لا يمكن حذف العميل لوجود بيانات مرتبطة به.', 'error');
-    } else {
-      showToast('حدث خطأ أثناء الحذف: ' + res.error, 'error');
-    }
-  }
-}
-
-function openWhatsApp(phone) {
-  if (!phone || phone === 'null' || phone.trim() === '') {
-    showToast('رقم التليفون غير مسجل', 'info');
-    return;
-  }
-  let waPhone = phone.replace(/\s+/g, '');
-  if (waPhone.startsWith('01')) waPhone = '2' + waPhone;
-  else if (!waPhone.startsWith('+2') && !waPhone.startsWith('20')) waPhone = '2' + waPhone;
-  
-  window.electron.openExternal(`https://api.whatsapp.com/send?phone=${waPhone}`);
-}
-
-// ─── Init ──────────────────────────────────────────────────────────────────────
-async function init() {
-  await loadCustomers();
-}
-
-init();
-</script>
+<script src="js/customers.js"></script>
 </body>
 </html>

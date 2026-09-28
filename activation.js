@@ -26,20 +26,86 @@ function setAppDataPath(p, app) {
   _app = app;
 }
 
+function getEffectiveAppDataPath() {
+  if (_appDataPath) return _appDataPath;
+  try {
+    const electron = require('electron');
+    const electronApp = electron.app || (electron.remote && electron.remote.app);
+    if (electronApp && typeof electronApp.getPath === 'function') {
+      _appDataPath = electronApp.getPath('userData');
+      return _appDataPath;
+    }
+  } catch (_) {}
+  if (process.env.APPDATA) {
+    return path.join(process.env.APPDATA, 'El-Tarzy');
+  }
+  return os.tmpdir();
+}
+
+function checkForReinstallFlag() {
+  const appData = getEffectiveAppDataPath();
+  const searchDirs = [
+    appData,
+    process.execPath ? path.dirname(process.execPath) : null,
+    __dirname,
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'El-Tarzy') : null,
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'el-tarzy') : null
+  ].filter(Boolean);
+
+  for (const dir of searchDirs) {
+    const flagFile = path.join(dir, '.reinstall.flag');
+    try {
+      if (fs.existsSync(flagFile)) {
+        console.log('[Activation] Reinstall flag detected at:', flagFile);
+        
+        // Remove .install.id files
+        const idFiles = [
+          path.join(appData, '.install.id'),
+          path.join(__dirname, '.install.id'),
+          process.env.APPDATA ? path.join(process.env.APPDATA, 'El-Tarzy', '.install.id') : null,
+          process.env.APPDATA ? path.join(process.env.APPDATA, 'el-tarzy', '.install.id') : null
+        ].filter(Boolean);
+
+        idFiles.forEach(f => {
+          try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) {}
+        });
+
+        // Remove license files
+        const licFiles = [
+          path.join(appData, '.eltarzy', '.lic'),
+          path.join(appData, '.lic'),
+          process.env.APPDATA ? path.join(process.env.APPDATA, 'El-Tarzy', '.eltarzy', '.lic') : null,
+          process.env.APPDATA ? path.join(process.env.APPDATA, 'el-tarzy', '.eltarzy', '.lic') : null
+        ].filter(Boolean);
+
+        licFiles.forEach(f => {
+          try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) {}
+        });
+
+        try { fs.unlinkSync(flagFile); } catch (_) {}
+        return true;
+      }
+    } catch (e) {
+      console.error('[Activation] Error handling reinstall flag:', e);
+    }
+  }
+  return false;
+}
+
 // ─── مسار ملف حالة التفعيل (AppData) ────────────────────────────────────────
 function getActivationFilePath() {
-  const dir = path.join(_appDataPath || os.tmpdir(), '.eltarzy');
+  const base = getEffectiveAppDataPath();
+  const dir = path.join(base, '.eltarzy');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, '.lic');
 }
 
 // ─── مسار كود التثبيت (في userData — مكتوب/مقروء بدون صلاحيات مرتفعة) ────────
 function getInstallIdFilePath() {
-  // نحفظ في userData دايماً: مكتوب بالإذن العادي، ويُحذف وقت الـ uninstall
-  if (_appDataPath) {
-    return path.join(_appDataPath, '.install.id');
+  const base = getEffectiveAppDataPath();
+  if (base) {
+    return path.join(base, '.install.id');
   }
-  // fallback وقت التطوير قبل ما يُضبط _appDataPath
   return path.join(__dirname, '.install.id');
 }
 
@@ -131,6 +197,7 @@ function decryptData(text) {
 
 // ─── تسجيل أول تشغيل للبرنامج ────────────────────────────────────────────────
 function ensureFirstRunRecorded() {
+  checkForReinstallFlag();
   const currentInstallId = getInstallId();
   let data = readActivationData();
 
@@ -315,4 +382,4 @@ function setupActivationIpc(ipcMain, app) {
   ipcMain.handle('activation:getInstallId', () => getInstallId());
 }
 
-module.exports = { setupActivationIpc, getActivationStatus, getHardwareId, getInstallId, generateSerial, generateTimedSerial };
+module.exports = { setupActivationIpc, getActivationStatus, getHardwareId, getInstallId, generateSerial, generateTimedSerial, activateWithSerial };

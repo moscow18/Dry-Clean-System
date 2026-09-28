@@ -1,5 +1,5 @@
 -- ============================================================
--- EL-TARZY — نظام إدارة محل الترزي
+-- DRY CLEAN — نظام إدارة الدراي كلين
 -- SQLite Schema — Full Database Definition
 -- ============================================================
 
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS customers (
   phone TEXT,
   opening_balance REAL DEFAULT 0,
   current_balance REAL DEFAULT 0,
+  notes TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -336,7 +337,7 @@ CREATE TABLE IF NOT EXISTS partners (
 -- إعدادات الشركة (كاملة — كل حقل يُطبع على الفاتورة ديناميكياً)
 CREATE TABLE IF NOT EXISTS company_settings (
   id INTEGER PRIMARY KEY DEFAULT 1,
-  company_name TEXT DEFAULT 'EL-Tarzy',
+  company_name TEXT DEFAULT 'Dry Clean',
   address TEXT,
   phone TEXT,
   logo_path TEXT,

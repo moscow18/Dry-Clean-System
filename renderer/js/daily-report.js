@@ -30,7 +30,7 @@ async function refreshSettings() {
   const r = await window.db.getSettings();
   if (r && r.success) {
     companySettings = r.data;
-    const shop = companySettings?.company_name || 'EL-Tarzy';
+    const shop = companySettings?.company_name || 'Dry Clean';
     document.getElementById('rptTitle').textContent    = '📊 ' + shop + ' — التقرير اليومي';
     document.getElementById('printTitle').textContent  = shop + ' — التقرير اليومي الشامل';
   }
@@ -129,7 +129,7 @@ function renderInvoices(invoices) {
       : `<span class="badge badge-g">✅ مكتمل</span>`;
     h += `<tr>
       <td>${i+1}</td>
-      <td><strong>${inv.invoice_number||'—'}</strong></td>
+      <td><strong>${inv.invoice_number||'—'} ${inv.is_express ? '⚡' : ''} ${inv.is_delivery ? '🛵' : ''}</strong></td>
       <td>${inv.customer_name||'نقدي'}</td>
       <td>${inv.payment_method||'—'}</td>
       <td>${fmt(total)} ج</td>
@@ -315,7 +315,7 @@ async function savePDFAndSend() {
   btn.innerHTML = '⏳ جاري الإرسال...';
 
   const date    = document.getElementById('reportDate').value;
-  const shop    = companySettings?.company_name || 'EL-Tarzy';
+  const shop    = companySettings?.company_name || 'Dry Clean';
   const { summary, treasuryBalances } = currentReportData;
   const totInc  = (summary.invoices_paid || 0) + (summary.revenues || 0);
   const totExp  = (summary.expenses    || 0) + (summary.returns   || 0);
@@ -379,7 +379,7 @@ function printThermalReport() {
   if (!currentReportData) { showToast('قم بتحميل التقرير أولاً', 'warning'); return; }
   const d = currentReportData;
   const date = document.getElementById('reportDate').value;
-  const shop = companySettings?.company_name || 'EL-Tarzy';
+  const shop = companySettings?.company_name || 'Dry Clean';
 
   const fmt2 = n => Number(n||0).toFixed(2);
   const row  = (lbl, val) => `<div class="row"><span>${lbl}</span><span class="bold">${val}</span></div>`;
@@ -478,7 +478,7 @@ function printThermalReport() {
   ${expSection}
   ${advSection}
   ${dRow()}
-  <div class="center" style="font-size:11px;margin-top:4px;">نظام الترزي — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
+  <div class="center" style="font-size:11px;margin-top:4px;">نظام دراي كلين — ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}</div>
   </body></html>`;
 
   let iframe = document.getElementById('thermalPrintFrame');

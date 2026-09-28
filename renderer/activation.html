@@ -2,19 +2,19 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — تفعيل النظام</title>
+  <title>DRY CLEAN — تفعيل النظام</title>
   <style>
     :root {
-      --accent:      #1B2A4A;
-      --gold:        #C9A84C;
-      --gold-light:  rgba(201,168,76,0.12);
+      --accent:      #DC2626;
+      --gold:        #121316;
+      --gold-light:  rgba(220,38,38,0.08);
       --danger:      #DC2626;
       --success:     #16A34A;
-      --bg:          #F1F5F9;
+      --bg:          #F8F9FA;
       --card:        #FFFFFF;
-      --card2:       #F8FAFC;
-      --border:      #E2E8F0;
-      --text:        #1E293B;
+      --card2:       #F1F3F5;
+      --border:      #E5E7EB;
+      --text:        #111827;
       --text-muted:  #64748B;
       --font:        'Cairo', sans-serif;
       --radius:      12px;
@@ -304,9 +304,9 @@
 
   <!-- Header -->
   <div class="header">
-    <div class="logo-badge">✂️</div>
+    <div class="logo-badge" style="font-weight:900;font-size:18px;">D</div>
     <div class="header-info">
-      <div class="shop-name" id="shopNameDisplay">EL-TARZY</div>
+      <div class="shop-name" id="shopNameDisplay">DRY CLEAN</div>
       <div class="page-title" id="pageTitle">تفعيل النظام</div>
     </div>
     <button class="back-btn" id="backBtn" onclick="goBack()">↩ رجوع للنظام</button>
@@ -350,9 +350,9 @@
     </div>
     <!-- Install ID -->
     <div class="code-card">
-      <div class="code-label">📦 كود التثبيت (يتغير مع إعادة التثبيت)</div>
+      <div class="code-label">📦 كود النسخة (يتغير مع كل تثبيت جديد)</div>
       <div class="code-value" id="installIdDisplay">جاري التحميل...</div>
-      <button class="copy-btn" id="copyInstallBtn" onclick="copyCode('installIdDisplay','copyInstallBtn')">📋 نسخ كود التثبيت</button>
+      <button class="copy-btn" id="copyInstallBtn" onclick="copyCode('installIdDisplay','copyInstallBtn')">📋 نسخ كود النسخة</button>
     </div>
   </div>
 
@@ -395,7 +395,7 @@
       const settingsRes = await window.db.getSettings();
       if (settingsRes.success && settingsRes.data) {
         const s = settingsRes.data;
-        document.getElementById('shopNameDisplay').textContent = s.company_name || 'EL-TARZY';
+        document.getElementById('shopNameDisplay').textContent = s.company_name || 'DRY CLEAN';
 
         // Contact phones are hardcoded in the HTML for activation support.
       }
@@ -427,18 +427,12 @@
           msg.textContent = 'النظام مفعّل بالكامل — شكراً لثقتك!';
         }
         backBtn.style.display = 'block';
-      } else if (status.trialExpired) {
+      } else {
         title.textContent = 'تفعيل النظام';
         banner.className = 'status-banner expired';
         icon.textContent = '🔒';
-        msg.textContent  = 'النظام غير مفعل. أرسل الكودين أعلاه للحصول على مفتاح التفعيل.';
-        backBtn.style.display = 'block'; // السماح بالرجوع للداشبورد (وضع القراءة فقط)
-      } else {
-        title.textContent = 'تفعيل النظام';
-        banner.className = 'status-banner trial';
-        icon.textContent = '⏳';
-        msg.textContent  = `أنت في فترة التجربة المجانية — متبقي ${status.daysLeft} ${status.daysLeft === 1 ? 'يوم' : 'أيام'}. يمكنك التفعيل الآن في أي وقت.`;
-        backBtn.style.display = 'block';
+        msg.textContent  = 'النظام غير مفعل. أرسل كود النسخة وكود الجهاز أعلاه للحصول على مفتاح التفعيل.';
+        backBtn.style.display = 'none'; // ممنوع الرجوع إطلاقاً حتى يتم التفعيل
       }
 
     } catch (e) {
@@ -531,8 +525,13 @@
     el.className = `feedback-msg ${type}`;
   }
 
-  function goBack() {
-    window.electron.navigate('login.html');
+  async function goBack() {
+    try {
+      const status = await window.activation.getStatus();
+      if (status && status.activated) {
+        window.electron.navigate('login.html');
+      }
+    } catch (_) {}
   }
 
   // ─── Init ────────────────────────────────────────────────────────────────────

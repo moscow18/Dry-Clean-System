@@ -1,3 +1,25 @@
+// ─── Collapsible Sidebar ──────────────────────────────────────────────────────
+function toggleSidebar() {
+  const layout = document.querySelector('.app-layout');
+  if (!layout) return;
+  layout.classList.toggle('sidebar-collapsed');
+  const isCollapsed = layout.classList.contains('sidebar-collapsed');
+  localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0');
+}
+
+// Restore sidebar state immediately
+(function initSidebar() {
+  if (localStorage.getItem('sidebar_collapsed') === '1') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelector('.app-layout')?.classList.add('sidebar-collapsed');
+      });
+    } else {
+      document.querySelector('.app-layout')?.classList.add('sidebar-collapsed');
+    }
+  }
+})();
+
 // ─── Clock ────────────────────────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
@@ -8,8 +30,6 @@ function updateClock() {
 }
 setInterval(updateClock, 1000);
 updateClock();
-
-
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 async function loadStats() {
@@ -100,15 +120,43 @@ let currentUser = { id: null, name: '', role: 'admin' };
 async function loadSystemLogo() {
   const res = await window.db.getSettings();
   if (res.success && res.data) {
+    let logoUrl = null;
     if (res.data.logo_path) {
-      const iconDiv = document.getElementById('navbarLogoIcon');
-      const safeLogo = 'file:///' + res.data.logo_path.replace(/\\/g, '/');
-      iconDiv.innerHTML = `<img src="${safeLogo}" style="width:100%; height:100%; object-fit:contain; border-radius:12px;">`;
-      iconDiv.style.background = 'transparent';
-      iconDiv.style.boxShadow = 'none';
+      if (window.electron && window.electron.getLogoPath) {
+        logoUrl = await window.electron.getLogoPath(res.data.logo_path);
+      }
+      if (!logoUrl && res.data.logo_path) {
+        logoUrl = 'file:///' + res.data.logo_path.replace(/\\/g, '/');
+      }
     }
+
+    const filename = res.data.logo_path ? res.data.logo_path.split(/[\\/]/).pop().toLowerCase() : '';
+    const isOldDefaultLogo = filename.includes('sewing') || filename === 'el-tarzy-logo.png';
+
+    if (logoUrl && !isOldDefaultLogo) {
+      const navIcon = document.getElementById('navbarLogoIcon');
+      if (navIcon) {
+        navIcon.innerHTML = `<img src="${logoUrl}" style="width:100%; height:100%; object-fit:contain; border-radius:10px;">`;
+        navIcon.style.background = 'transparent';
+        navIcon.style.boxShadow = 'none';
+      }
+      const sideIcon = document.getElementById('sidebarLogoIcon') || document.querySelector('.sidebar-logo .logo-icon');
+      if (sideIcon) {
+        sideIcon.innerHTML = `<img src="${logoUrl}" style="width:100%; height:100%; object-fit:contain; border-radius:10px;">`;
+        sideIcon.style.background = 'transparent';
+        sideIcon.style.boxShadow = 'none';
+      }
+    }
+
     if (res.data.company_name) {
-      document.getElementById('navbarLogoText').textContent = res.data.company_name;
+      const name = res.data.company_name.trim();
+      if (name) {
+        const navText = document.getElementById('navbarLogoText');
+        if (navText) navText.textContent = name;
+
+        const sideText = document.getElementById('sidebarLogoText') || document.querySelector('.sidebar-logo .logo-text');
+        if (sideText) sideText.textContent = name;
+      }
     }
   }
 }
@@ -191,14 +239,14 @@ async function applyRoleVisibility(role) {
         const text = label.textContent.trim();
         
         // Base allowed for cashier
-        let allowed = ['حضور', 'فاتورة بيع', 'انصراف', 'نهاية الشيفت', 'عميل جديد'];
+        let allowed = ['حضور', 'فاتورة بيع', 'فاتورة دراي كلين', 'انصراف', 'نهاية الشيفت', 'عميل جديد', 'تقرير الدليفري'];
         
         // Add conditionally based on permissions
         if (!s.cashier_prevent_returns) allowed.push('مرتجع بيع');
         if (!s.cashier_hide_finance) allowed.push('الحسابات');
         if (!s.cashier_hide_reports) allowed.push('التقارير');
         
-        if (!allowed.includes(text)) {
+        if (!allowed.includes(text) && !text.includes('فاتورة')) {
           btn.style.display = 'none';
         }
       });
@@ -208,8 +256,8 @@ async function applyRoleVisibility(role) {
         const label = btn.querySelector('.action-btn-label');
         if (!label) return;
         const text = label.textContent.trim();
-        const cashierAllowed = ['حضور', 'فاتورة بيع', 'مرتجع بيع', 'انصراف', 'نهاية الشيفت', 'عميل جديد'];
-        if (!cashierAllowed.includes(text)) {
+        const cashierAllowed = ['حضور', 'فاتورة بيع', 'فاتورة دراي كلين', 'مرتجع بيع', 'انصراف', 'نهاية الشيفت', 'عميل جديد', 'تقرير الدليفري'];
+        if (!cashierAllowed.includes(text) && !text.includes('فاتورة')) {
           btn.style.display = 'none';
         }
       });
@@ -377,32 +425,139 @@ async function saveDashboardCheckoutAll() {
   closeModal('attendanceModal');
 }
 
-// ─── Auto-Checkout Missing Previous Days ──────────────────────────────────────
-async function autoCheckoutMissing() {
+// الغياب التلقائي مُعطَّل — يبقى يدوياً دائماً (Task 4)
+
+// ─── Delivery Report Modal ────────────────────────────────────────────────────
+async function openDeliveryReportModal() {
   const today = getLocalISODate();
-  // Select attendance older than today without checkout
-  const res = await window.db.query(
-    `SELECT a.*, e.work_hours_per_day FROM attendance a JOIN employees e ON a.employee_id = e.id WHERE a.date < ? AND a.check_out IS NULL`,
-    [today]
-  );
-  if (res.success && res.data && res.data.length > 0) {
-    for (const att of res.data) {
-      const checkInTime = new Date(att.check_in);
-      const workHours = att.work_hours_per_day || 8;
-      const idealCheckOut = new Date(checkInTime.getTime() + workHours * 60 * 60 * 1000);
-      const offsetMs = idealCheckOut.getTimezoneOffset() * 60000;
-      const localIso = new Date(idealCheckOut.getTime() - offsetMs).toISOString().slice(0,19);
-      await window.db.run(
-        `UPDATE attendance SET check_out=?, late_minutes=0, extra_minutes=0 WHERE id=?`,
-        [localIso, att.id]
-      );
-    }
-    console.log(`[Auto-Checkout] Fixed ${res.data.length} missing checkouts from previous days.`);
+  document.getElementById('deliveryReportDate').textContent = today;
+  openModal('deliveryReportModal');
+
+  // جلب فواتير الدليفري (الحالية التي خرجت للتوصيل، أو التي تم توصيلها اليوم)
+  const res = await window.db.query(`
+    SELECT i.*, 
+           c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+           d.name as driver_name
+    FROM invoices i
+    LEFT JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN employees d ON i.driver_id = d.id
+    WHERE i.is_delivery = 1 AND i.is_returned = 0 AND (
+      i.status = 'خرج للتوصيل' OR
+      (i.status = 'تم التسليم' AND (i.delivered_at LIKE ? OR i.invoice_date = ?))
+    )
+    ORDER BY i.id DESC
+  `, [today + '%', today]);
+
+  const outBody = document.getElementById('outForDeliveryTableBody');
+  const delvBody = document.getElementById('deliveredTodayTableBody');
+
+  if (!res.success || !res.data || res.data.length === 0) {
+    outBody.innerHTML = `<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text-muted);">لا توجد طلبات دليفري اليوم</td></tr>`;
+    delvBody.innerHTML = `<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--text-muted);">لا توجد توصيلات مكتملة اليوم</td></tr>`;
+    return;
+  }
+
+  const outOrders = res.data.filter(r => r.status === 'خرج للتوصيل');
+  const delivered = res.data.filter(r => r.status === 'تم التسليم');
+
+  // ─── Out for delivery ───
+  if (outOrders.length === 0) {
+    outBody.innerHTML = `<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text-muted);">لا توجد طلبات خرجت للتوصيل حالياً</td></tr>`;
+  } else {
+    outBody.innerHTML = outOrders.map(r => `
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:10px;font-weight:700;color:var(--primary);">${r.invoice_number}</td>
+        <td style="padding:10px;">${r.customer_name || '—'}</td>
+        <td style="padding:10px;direction:ltr;text-align:right;">${r.customer_phone || '—'}</td>
+        <td style="padding:10px;font-size:12px;">${r.customer_address || '—'}</td>
+        <td style="padding:10px;font-weight:600;color:#0284c7;">🏍️ ${r.driver_name || '—'}</td>
+        <td style="padding:10px;font-weight:700;color:var(--accent);">${Number(r.net_total||0).toLocaleString('en-US', {minimumFractionDigits:2})} جنيه</td>
+        <td style="padding:10px;">${r.remaining > 0 ? `<span style="color:var(--danger);font-weight:700;">باقي ${Number(r.remaining).toLocaleString('en-US', {minimumFractionDigits:2})}</span>` : `<span style="color:var(--success);font-weight:700;">مسدد</span>`}</td>
+        <td style="padding:10px;">
+          <button class="btn btn-sm btn-success" onclick="markDelivered(${r.id})">✔ تم التوصيل</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // ─── Delivered today ───
+  if (delivered.length === 0) {
+    delvBody.innerHTML = `<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--text-muted);">لا توجد توصيلات مكتملة اليوم</td></tr>`;
+  } else {
+    delvBody.innerHTML = delivered.map(r => `
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:10px;font-weight:700;color:var(--primary);">${r.invoice_number}</td>
+        <td style="padding:10px;">${r.customer_name || '—'}</td>
+        <td style="padding:10px;direction:ltr;text-align:right;">${r.customer_phone || '—'}</td>
+        <td style="padding:10px;font-size:12px;">${r.customer_address || '—'}</td>
+        <td style="padding:10px;font-weight:600;color:#0284c7;">🏍️ ${r.driver_name || '—'}</td>
+        <td style="padding:10px;font-weight:700;color:var(--accent);">${Number(r.net_total||0).toLocaleString('en-US', {minimumFractionDigits:2})} جنيه</td>
+        <td style="padding:10px;font-size:12px;color:var(--text-muted);">${r.delivered_at ? r.delivered_at.substring(0,16) : '—'}</td>
+      </tr>
+    `).join('');
   }
 }
-// Run auto checkout silently when dashboard loads
-setTimeout(autoCheckoutMissing, 2000);
 
+async function markDelivered(invoiceId) {
+  const invRes = await window.db.query(
+    `SELECT i.*, c.name as customer_name, c.phone as customer_phone 
+     FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`,
+    [invoiceId]
+  );
+  if (!invRes.success || !invRes.data || invRes.data.length === 0) return;
+  const inv = invRes.data[0];
+
+  if (inv.remaining > 0) {
+    const { value: safeType } = await Swal.fire({
+      title: `تسديد الباقي (${Number(inv.remaining).toLocaleString('en-US', {minimumFractionDigits:2})} جنيه)`,
+      text: 'يوجد مبلغ متبقي على الفاتورة، اختر خزينة الاستلام لتسديده:',
+      input: 'select',
+      inputOptions: {
+        'الخزينة': '💵 الخزنة النقدية (كاش)',
+        'فودافون كاش': '📱 فودافون كاش',
+        'إنستا باي': '⚡ إنستا باي'
+      },
+      inputValue: 'الخزينة',
+      showCancelButton: true,
+      confirmButtonText: 'تسديد وتسليم ✅',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!safeType) return;
+    const payRes = await window.db.payInvoiceRemaining(invoiceId, inv.remaining, safeType);
+    if (!payRes.success) {
+      showToast('خطأ في تسديد المبلغ: ' + payRes.error, 'error');
+      return;
+    }
+  }
+
+  // في حالة فواتير الاستلام من المحل: التحقق من مسح جميع الأكياس قبل التسليم
+  if (!inv.is_delivery) {
+    const verified = await verifyAllBagsScanned(invoiceId, inv.invoice_number, 'تسليم الطلب للعميل في المحل');
+    if (!verified) return;
+  }
+
+  const updateRes = await window.db.updateInvoiceStatus(invoiceId, 'تم التسليم');
+  if (updateRes && !updateRes.success) {
+    showToast('خطأ في تحديث الحالة', 'error');
+    return;
+  }
+  
+  showToast('تم تحديث حالة الطلب إلى "تم التسليم" ✅', 'success');
+
+  // WhatsApp
+  if (inv.customer_phone && inv.customer_phone !== 'null' && inv.customer_phone.trim() !== '') {
+    const waStatus = await window.whatsapp.getStatus();
+    if (waStatus.ready) {
+      await window.whatsapp.sendDelivered({
+        phone: inv.customer_phone,
+        customerName: inv.customer_name,
+        invoiceNumber: inv.invoice_number,
+      });
+    }
+  }
+
+  openDeliveryReportModal(); // refresh
+}
 
 
 // ─── End Shift — Navigate to end-shift screen (cashier only) ────────────────────
@@ -577,15 +732,21 @@ async function checkTrialStatus() {
         ? '⚠️ باقي يوم واحد فقط على انتهاء فترة التجربة المجانية!'
         : `⚠️ باقي ${days} ${days <= 10 ? 'أيام' : 'يوم'} على انتهاء فترة التجربة المجانية`;
       if (days <= 2) {
-        banner.style.background = 'linear-gradient(135deg,#7f1d1d,#991b1b)';
-        bannerText.style.color = '#FCA5A5';
+        banner.style.background = 'rgba(220, 38, 38, 0.08)';
+        banner.style.borderBottom = '1px solid rgba(220, 38, 38, 0.25)';
+        bannerText.style.color = '#DC2626';
+      } else {
+        banner.style.background = 'rgba(217, 119, 6, 0.08)';
+        banner.style.borderBottom = '1px solid rgba(217, 119, 6, 0.25)';
+        bannerText.style.color = '#B45309';
       }
     } else if (status.trialExpired && !status.activated) {
       // انتهت التجربة أو التفعيل المؤقت — إغلاق كامل للنظام
       banner.style.display = 'flex';
       bannerText.textContent = '🔒 انتهت فترة الصلاحية. الرجاء تفعيل النظام للاستمرار.';
-      banner.style.background = 'linear-gradient(135deg,#4a1d1d,#5c1a1a)';
-      bannerText.style.color = '#FCA5A5';
+      banner.style.background = 'rgba(220, 38, 38, 0.15)';
+      banner.style.borderBottom = '1px solid rgba(220, 38, 38, 0.4)';
+      bannerText.style.color = '#991B1B';
       showFullLockOverlay();
     } else if (status.activated && status.isTimed) {
       // تفعيل مؤقت نشط — اعرض الأيام المتبقية كمعلومة
@@ -595,14 +756,14 @@ async function checkTrialStatus() {
         ? '⚠️ باقي يوم واحد فقط على انتهاء اشتراكك!'
         : `⏳ اشتراكك الحالي ساري ومتبقي ${days} ${days <= 10 ? 'أيام' : 'يوم'} على انتهائه.`;
       
-      // تغيير لون البانر ليكون مختلف (مثلاً أزرق/ذهبي)
       if (days <= 5) {
-        banner.style.background = 'linear-gradient(135deg,#7f1d1d,#991b1b)'; // تحذير إذا اقترب الانتهاء
-        bannerText.style.color = '#FCA5A5';
+        banner.style.background = 'rgba(220, 38, 38, 0.08)';
+        banner.style.borderBottom = '1px solid rgba(220, 38, 38, 0.25)';
+        bannerText.style.color = '#DC2626';
       } else {
-        banner.style.background = 'linear-gradient(135deg,#1B2A4A,#2d4373)';
-        banner.style.borderColor = '#C9A84C';
-        bannerText.style.color = '#F8FAFC';
+        banner.style.background = 'rgba(18, 19, 22, 0.04)';
+        banner.style.borderBottom = '1px solid var(--border)';
+        bannerText.style.color = 'var(--text-secondary)';
       }
     }
   } catch (e) { /* ignore if activation API not available */ }

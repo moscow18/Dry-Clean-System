@@ -18,13 +18,16 @@ const SHIFT_STATUS = {
 const INVOICE_STATUS = {
   IN_PROGRESS: 'تحت الشغل',
   READY: 'جاهز للاستلام',
+  AWAITING: 'في انتظار الاستلام',
   DELIVERED: 'تم التسليم',
   RETURNED: 'مرتجع',
+  OUT_FOR_DELIVERY: 'خرج للتوصيل',
 };
 
 const TREASURY_TYPES = {
   CASH: 'الخزينة',
   VODAFONE: 'فودافون كاش',
+  INSTAPAY: 'إنستا باي',
 };
 
 const ENTRY_TYPES = {
@@ -35,13 +38,24 @@ const ENTRY_TYPES = {
 const PAYMENT_METHODS = {
   CASH: 'نقدي',
   VODAFONE: 'فودافون كاش',
+  INSTAPAY: 'إنستا باي',
   DEFERRED: 'آجل',
 };
+
+// نقشة treasury_type → payment_method
+function treasuryTypeToPaymentMethod(treasuryType, isDeferred) {
+  if (isDeferred) return PAYMENT_METHODS.DEFERRED;
+  switch (treasuryType) {
+    case TREASURY_TYPES.VODAFONE: return PAYMENT_METHODS.VODAFONE;
+    case TREASURY_TYPES.INSTAPAY: return PAYMENT_METHODS.INSTAPAY;
+    default: return PAYMENT_METHODS.CASH; // 'الخزينة' → 'نقدي'
+  }
+}
 
 const EMPLOYEE_TYPES = {
   REGULAR: 'موظف عادي',
   MANAGER: 'مدير',
-  TAILOR: 'خياط',
+  DELIVERY_DRIVER: 'مندوب توصيل',
 };
 
 const SALARY_TYPES = {
@@ -59,4 +73,5 @@ module.exports = {
   PAYMENT_METHODS,
   EMPLOYEE_TYPES,
   SALARY_TYPES,
+  treasuryTypeToPaymentMethod,
 };

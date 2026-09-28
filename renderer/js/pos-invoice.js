@@ -6,10 +6,10 @@ function renderPosHistory(invoices) {
     tbody.innerHTML = '<tr><td colspan="6" style="padding:20px; text-align:center; color:var(--text-muted);">لا توجد فواتير مطابقة</td></tr>';
   } else {
     tbody.innerHTML = invoices.map(inv => `
-      <tr data-id="${inv.id}" data-invnum="${(inv.invoice_number||'').toLowerCase()}" data-custname="${(inv.customer_name||'').toLowerCase()}" data-custphone="${(inv.customer_phone||'').toLowerCase()}" data-tailorid="${inv.tailor_id||''}" style="border-bottom:1px solid var(--border);">
-        <td style="padding:12px; font-weight:bold; color:var(--primary);">${inv.invoice_number}</td>
+      <tr data-id="${inv.id}" data-invnum="${(inv.invoice_number||'').toLowerCase()}" data-custname="${(inv.customer_name||'').toLowerCase()}" data-custphone="${(inv.customer_phone||'').toLowerCase()}" style="border-bottom:1px solid var(--border);">
+        <td style="padding:12px; font-weight:bold; color:var(--primary);">${inv.invoice_number} ${inv.is_express ? '⚡' : ''} ${inv.is_delivery ? '🛵' : ''}</td>
         <td style="padding:12px;">${inv.customer_name || 'عميل نقدي'}</td>
-        <td style="padding:12px; font-size:12px; color:var(--text-secondary);">${inv.tailor_name || '—'}</td>
+        <td style="padding:12px; font-size:12px; color:var(--text-secondary);">${inv.driver_name ? '🛵 ' + inv.driver_name : '—'}</td>
         <td style="padding:12px; font-weight:bold; color:var(--success);">${fmt(inv.dynamic_net_total)}</td>
         <td style="padding:12px; font-size:12px; color:var(--text-muted);">${inv.invoice_date}</td>
         <td style="padding:12px; text-align:center;">
@@ -36,9 +36,8 @@ function filterPosHistory() {
 function _doFilter() {
   const query    = (document.getElementById('posHistorySearch').value || '').toLowerCase();
   const phone    = (document.getElementById('posHistoryPhone').value || '').toLowerCase();
-  const tailorId = document.getElementById('posHistoryTailor')?.value || '';
 
-  if (!query && !phone && !tailorId) {
+  if (!query && !phone) {
     renderPosHistory(posAllInvoices.slice(0, 30));
     return;
   }
@@ -47,13 +46,11 @@ function _doFilter() {
     const invNum           = (inv.invoice_number || '').toLowerCase();
     const custName         = (inv.customer_name  || '').toLowerCase();
     const custPhone        = (inv.customer_phone || '').toLowerCase();
-    const rowTailor        = (inv.tailor_id      || '').toString();
     const dynamicNetTotal  = (inv.dynamic_net_total || 0).toString();
 
-    const matchQuery  = !query    || invNum.includes(query) || custName.includes(query) || dynamicNetTotal.includes(query);
-    const matchPhone  = !phone    || custPhone.includes(phone);
-    const matchTailor = !tailorId || rowTailor === tailorId;
-    return matchQuery && matchPhone && matchTailor;
+    const matchQuery  = !query || invNum.includes(query) || custName.includes(query) || dynamicNetTotal.includes(query);
+    const matchPhone  = !phone || custPhone.includes(phone);
+    return matchQuery && matchPhone;
   });
 
   renderPosHistory(filtered);
@@ -187,7 +184,7 @@ let allServices = [];
 let currentInvoiceNumber = '';
 let lastSavedInvoice = null;
 let sessionRole = null;
-let settings = { company_name: 'EL-Tarzy', currency: 'جنيه', receipt_footer: 'شكراً لزيارتكم' };
+let settings = { company_name: 'Dry Clean', currency: 'جنيه', receipt_footer: 'شكراً لزيارتكم' };
 
 // ─── Init ─────────────────────────────────────────────────────────────────────────────
 async function init() {
@@ -204,6 +201,7 @@ async function init() {
     srvRes,
     custRes,
     empRes,
+    driverRes,
   ] = await Promise.all([
     window.db.generateInvoiceNumber(),
     window.db.getSettings(),
@@ -211,6 +209,7 @@ async function init() {
     window.db.query('SELECT s.*, sc.name as cat_name FROM services s LEFT JOIN service_categories sc ON s.category_id=sc.id ORDER BY s.name', []),
     window.db.query('SELECT id,name,phone FROM customers ORDER BY name', []),
     window.db.query('SELECT id,name FROM employees WHERE is_active=1 ORDER BY name', []),
+    window.db.query("SELECT id,name FROM employees WHERE is_active=1 AND (employee_type='\u0645\u0646\u062f\u0648\u0628 \u062a\u0648\u0635\u064a\u0644' OR job_title LIKE '%\u062f\u0644\u064a\u0641\u0631%' OR job_title LIKE '%\u0637\u064a\u0627\u0631%') ORDER BY name", []),
   ]);
 
   // Invoice number
@@ -267,21 +266,31 @@ async function init() {
     cList.innerHTML = custHtml;
   }
 
-  // Employees
+  // Employees (cashier only)
   const empSel  = document.getElementById('employeeSelect');
-  const tailorSel = document.getElementById('tailorSelect');
   if (empRes.success) {
-    let empHtml = '<option value="">اختر الكاشير</option>';
-    let tailorHtml = '<option value="">بدون خياط</option>';
+    let empHtml = '<option value="">\u0627\u062e\u062a\u0631 \u0627\u0644\u0643\u0627\u0634\u064a\u0631</option>';
     empRes.data.forEach(e => {
       empHtml += `<option value="${e.id}">${e.name}</option>`;
-      tailorHtml += `<option value="${e.id}">${e.name}</option>`;
     });
     empSel.innerHTML = empHtml;
-    tailorSel.innerHTML = tailorHtml;
   } else {
-    empSel.innerHTML = '<option value="">اختر الكاشير</option>';
-    tailorSel.innerHTML = '<option value="">بدون خياط</option>';
+    empSel.innerHTML = '<option value="">\u0627\u062e\u062a\u0631 \u0627\u0644\u0643\u0627\u0634\u064a\u0631</option>';
+  }
+
+  // Drivers
+  const driverSel = document.getElementById('driverSelect');
+  if (driverRes.success && driverRes.data && driverRes.data.length > 0) {
+    let dHtml = '<option value="">\u0627\u062e\u062a\u0631 \u0627\u0644\u0637\u064a\u0627\u0631</option>';
+    driverRes.data.forEach(d => { dHtml += `<option value="${d.id}">${d.name}</option>`; });
+    driverSel.innerHTML = dHtml;
+  } else {
+    // Fallback: show all active employees as potential drivers
+    if (empRes.success) {
+      let dHtml = '<option value="">\u0627\u062e\u062a\u0631 \u0627\u0644\u0637\u064a\u0627\u0631</option>';
+      empRes.data.forEach(e => { dHtml += `<option value="${e.id}">${e.name}</option>`; });
+      driverSel.innerHTML = dHtml;
+    }
   }
 
   // Auto-select current employee as cashier
@@ -471,6 +480,8 @@ function addItemToInvoice() {
 function renderItemsTable() {
   const tbody = document.getElementById('invoiceItemsBody');
   const isSaved = lastSavedInvoice !== null;
+  const isExpress = document.getElementById('isExpressCheck')?.checked || false;
+  const multiplier = isExpress ? 2 : 1;
   const isPriceEditDisabled = isSaved || (Number(settings.prevent_cashier_price_edit) === 1 && sessionRole === 'cashier');
   const isDiscountEditDisabled = isSaved || (Number(settings.cashier_prevent_discount) === 1 && sessionRole === 'cashier');
   
@@ -478,22 +489,28 @@ function renderItemsTable() {
     tbody.innerHTML=`<tr id="emptyRow"><td colspan="9" class="table-empty"><div style="font-size:32px;margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent);"><path d="M9 12h6M9 16h6M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>ابدأ بإضافة خدمات للفاتورة</td></tr>`;
     return;
   }
-  tbody.innerHTML = invoiceItems.map((item,i)=>`
+  tbody.innerHTML = invoiceItems.map((item,i)=> {
+    const effectivePrice = item.sell_price * multiplier;
+    const itemTotal = (effectivePrice - item.item_discount) * item.quantity;
+    return `
     <tr>
       <td style="color:var(--text-muted);font-size:11px;">${i+1}</td>
       <td><span class="badge badge-accent" style="font-size:10px;">${item.category_name||'—'}</span></td>
-      <td style="font-weight:600;">${item.service_name}</td>
+      <td style="font-weight:600;">${item.service_name} ${isExpress ? '<span style="color:#f59e0b;font-size:10px;">⚡</span>' : ''}</td>
       <td style="color:var(--text-muted);font-size:11px;font-family:monospace;">${item.barcode||'—'}</td>
-      <td><input type="number" class="qty-input" style="width:70px;" value="${item.sell_price}" min="0" step="0.5" onchange="updateItemPrice(${i}, this.value)" ${isPriceEditDisabled ? 'disabled' : ''} /></td>
+      <td>
+        <input type="number" class="qty-input" style="width:70px;" value="${item.sell_price}" min="0" step="0.5" onchange="updateItemPrice(${i}, this.value)" ${isPriceEditDisabled ? 'disabled' : ''} />
+        ${isExpress ? `<small style="display:block;font-size:10px;color:#f59e0b;font-weight:700;">×2 = ${fmt(effectivePrice)}</small>` : ''}
+      </td>
       <td>
         <input type="number" class="qty-input" value="${item.quantity}" min="1"
           onchange="updateQty(${i}, this.value)" ${isSaved?'disabled':''} />
       </td>
       <td><input type="number" class="qty-input" style="width:70px;" value="${item.item_discount}" min="0" onchange="updateItemDiscount(${i}, this.value)" ${isDiscountEditDisabled ? 'disabled' : ''} /></td>
-      <td style="font-weight:700;color:var(--primary);">${fmt(item.total)}</td>
+      <td style="font-weight:700;color:var(--primary);">${fmt(itemTotal)}</td>
       <td>${isSaved ? '—' : `<button class="delete-row-btn" onclick="removeItem(${i})">✕</button>`}</td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 function updateQty(idx, val) {
@@ -527,9 +544,11 @@ function removeItem(idx) {
   recalcTotals();
 }
 
-// ─── Totals ───────────────────────────────────────────────────────────────────
+// ─── Totals ────────────────────────────────────────────────────
 function recalcTotals() {
-  const subtotal = invoiceItems.reduce((s,i)=>s+(i.sell_price*i.quantity),0);
+  const isExpress = document.getElementById('isExpressCheck')?.checked || false;
+  const multiplier = isExpress ? 2 : 1;
+  const subtotal = invoiceItems.reduce((s,i)=>s+(i.sell_price * multiplier * i.quantity),0);
   const itemDiscounts = invoiceItems.reduce((s,i)=>s+(i.item_discount*i.quantity),0);
 
   let discountAmt = parseFloat(document.getElementById('discountAmount').value)||0;
@@ -565,6 +584,30 @@ function payFull() {
   recalcTotals();
 }
 
+// ─── Delivery Toggle ──────────────────────────────────────────────────────────
+function onDeliveryToggle() {
+  const isDelivery = document.getElementById('isDeliveryCheck').checked;
+  const lbl = document.getElementById('deliveryLabel');
+  if (lbl) lbl.textContent = isDelivery ? 'دليفري' : '';
+  const driverField = document.getElementById('driverField');
+  if (driverField) {
+    driverField.style.display = isDelivery ? 'flex' : 'none';
+  }
+  const driverSelect = document.getElementById('driverSelect');
+  if (!isDelivery && driverSelect) {
+    driverSelect.value = '';
+  }
+}
+
+// ─── Express Toggle ──────────────────────────────────────────────────────────
+function onExpressToggle() {
+  const isExpress = document.getElementById('isExpressCheck').checked;
+  const lbl = document.getElementById('expressLabel');
+  if (lbl) lbl.textContent = isExpress ? '⚡ مضاعف' : '';
+  renderItemsTable();
+  recalcTotals();
+}
+
 // ─── Save Invoice ─────────────────────────────────────────────────────────────
 async function saveInvoice(isPrint = false) {
   if(!invoiceItems.length){ showToast('لا توجد أصناف في الفاتورة','error'); return false; }
@@ -575,42 +618,68 @@ async function saveInvoice(isPrint = false) {
   const netTotal = parseFloat(document.getElementById('netTotalDisplay').textContent)||0;
   const amtPaid = parseFloat(document.getElementById('amountPaid').value)||0;
   const remaining = parseFloat(document.getElementById('remainingDisplay').textContent)||0;
+  const isDelivery = document.getElementById('isDeliveryCheck')?.checked ? 1 : 0;
+
+  // تحقق دليفري: العميل والعنوان والطيار مطلوبان
+  if (isDelivery) {
+    const custId = document.getElementById('customerSelect').value;
+    if (!custId) {
+      showToast('الدليفري يتطلب اختيار عميل أولاً', 'error');
+      return false;
+    }
+    const custRes = await window.db.queryOne('SELECT address FROM customers WHERE id=?', [custId]);
+    const custAddr = custRes.data?.address || '';
+    if (!custAddr.trim()) {
+      showToast('الدليفري يتطلب عنوان العميل — عدل بيانات العميل أولاً', 'error');
+      return false;
+    }
+    const driverId = document.getElementById('driverSelect')?.value;
+    if (!driverId) {
+      showToast('الدليفري يتطلب اختيار الطيار', 'error');
+      return false;
+    }
+  }
+
+  const isExpress = document.getElementById('isExpressCheck')?.checked ? 1 : 0;
+  const driverId = parseInt(document.getElementById('driverSelect')?.value) || null;
 
   const invoiceData = {
     customer_id: parseInt(document.getElementById('customerSelect').value)||null,
     employee_id: parseInt(document.getElementById('employeeSelect').value)||null,
-    tailor_id: parseInt(document.getElementById('tailorSelect').value)||null,
     invoice_date: document.getElementById('invoiceDate').value,
-    invoiceNumber: window._resumedInvoiceNumber || null,      // Fix 1: send resumed number
-    payment_method: window._resumedPaymentMethod || 'نقدي',  // Fix 3: default to نقدي
-    invoice_type: null,                                       // Fix 3: default null
+    invoiceNumber: window._resumedInvoiceNumber || null,
+    invoice_type: null,
     treasury_type: document.getElementById('treasuryType').value,
     subtotal, discount_percent:discountPct, discount_amount:discountAmt,
     net_total:netTotal, amount_paid:amtPaid, remaining,
-    notes: document.getElementById('invoiceNotes').value
+    notes: document.getElementById('invoiceNotes').value,
+    is_delivery: isDelivery,
+    is_express: isExpress,
+    driver_id: driverId
   };
-  window._resumedPaymentMethod = null; // clear after use
+  // payment_method يُشتق من treasury_type داخل db.js تلقائياً
+  window._resumedPaymentMethod = null;
 
   const res = await window.db.saveInvoice(invoiceData, invoiceItems);
   if(res.success){
     lastSavedInvoice = { ...invoiceData, items:[...invoiceItems], invoiceNumber:res.data.invoiceNumber };
 
-    // ── عرض نافذة النجاح ──
-    document.getElementById('savedInvNum').textContent = `فاتورة رقم: ${res.data.invoiceNumber}`;
-    document.getElementById('savedInvTotal').textContent = `الإجمالي: ${fmt(netTotal)} جنيه | المدفوع: ${fmt(amtPaid)} | المتبقي: ${fmt(remaining)}`;
-    
-    // إخفاء / إظهار زرار واتساب حسب وجود رقم العميل
-    const customerPhone = getSelectedCustomerPhone();
-    const waBtn = document.getElementById('savedModalWaBtn');
-    if (waBtn) {
-      waBtn.style.display = customerPhone ? 'inline-flex' : 'none';
-    }
-    
-    openModal('savedModal');
-    showToast('تم حفظ الفاتورة بنجاح', 'success');
+    // ── عرض نافذة النجاح فقط لو كان حفظ عادي بدون طباعة ──
     if (!isPrint) {
-      // لا تعمل newInvoice() هنا — خلي المستخدم يختار
+      const expressBadgeText = isExpress ? ' ⚡ مستعجل' : '';
+      document.getElementById('savedInvNum').textContent = `فاتورة رقم: ${res.data.invoiceNumber}${isDelivery ? ' 🚚 دليفري' : ''}${expressBadgeText}`;
+      document.getElementById('savedInvTotal').textContent = `الإجمالي: ${fmt(netTotal)} جنيه | المدفوع: ${fmt(amtPaid)} | المتبقي: ${fmt(remaining)}`;
+      
+      // إخفاء / إظهار زرار واتساب حسب وجود رقم العميل
+      const customerPhone = getSelectedCustomerPhone();
+      const waBtn = document.getElementById('savedModalWaBtn');
+      if (waBtn) {
+        waBtn.style.display = customerPhone ? 'inline-flex' : 'none';
+      }
+      
+      openModal('savedModal');
     }
+    showToast('تم حفظ الفاتورة بنجاح', 'success');
     return true;
   } else {
     showToast('خطأ في الحفظ: '+res.error,'error');
@@ -646,12 +715,9 @@ async function sendWhatsApp() {
     return;
   }
 
-  const shopName = settings.company_name || 'الترزي';
+  const shopName = settings.company_name || 'دراي كلين';
   const customerName = getSelectedCustomerName();
   
-  const tailorSelect = document.getElementById('tailorSelect');
-  let tailorName = tailorSelect.options[tailorSelect.selectedIndex]?.text;
-  if (!tailorName || tailorName === 'بدون خياط' || tailorName === 'اختر الخياط...') tailorName = 'غير محدد';
   const now = new Date();
   const timeStr = now.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute:'2-digit' });
 
@@ -663,7 +729,6 @@ async function sendWhatsApp() {
     paid: fmt(lastSavedInvoice.amount_paid || 0),
     remaining: fmt(lastSavedInvoice.remaining || 0),
     shopName,
-    tailorName: tailorName,
     date: lastSavedInvoice.invoice_date,
     time: timeStr
   });
@@ -686,7 +751,7 @@ async function sendWhatsAppFromHistory(inv) {
     return;
   }
 
-  const shopName = settings.company_name || 'الترزي';
+  const shopName = settings.company_name || 'دراي كلين';
   const customerName = inv.customer_name || 'عميلنا العزيز';
 
   const res = await window.whatsapp.sendInvoiceConfirm({
@@ -697,7 +762,6 @@ async function sendWhatsAppFromHistory(inv) {
     paid: fmt(inv.amount_paid || 0),
     remaining: fmt(inv.remaining || 0),
     shopName,
-    tailorName: inv.tailor_name || 'غير محدد',
     date: inv.invoice_date || '',
     time: ''
   });
@@ -710,7 +774,7 @@ async function sendWhatsAppFromHistory(inv) {
 }
 
 // ─── Print Receipt ────────────────────────────────────────────────────────────
-function buildReceiptHTML(inv) {
+async function buildReceiptHTML(inv) {
   const itemsRows = (inv.items||invoiceItems).map((item,i)=>`
     <tr style="border-bottom:1px dashed #555;">
       <td style="padding:3px 2px;font-weight:700;">${i+1}</td>
@@ -735,13 +799,7 @@ function buildReceiptHTML(inv) {
   const addressHTML = settings.address ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">العنوان: ${settings.address}</div>` : '';
   const phoneHTML = settings.phone ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:2px;">تليفون: ${settings.phone}</div>` : '';
   
-  const tailorSelect = document.getElementById('tailorSelect');
   const custSelect = document.getElementById('customerSelect');
-  let tailorName = inv.tailor_name || inv.tailorName;
-  if (!tailorName && tailorSelect) {
-    tailorName = tailorSelect.options[tailorSelect.selectedIndex]?.text;
-  }
-  const tailorHTML = (settings.show_tailor_name && tailorName && tailorName !== 'اختر الخياط...' && tailorName !== 'بدون خياط') ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخياط:</span><span style="font-weight:700;">${tailorName}</span></div>` : '';
   
   // Note: if reprinted from history, customer info might be directly on inv object
   let custName = 'عميل نقدي';
@@ -765,6 +823,41 @@ function buildReceiptHTML(inv) {
   }
   const custNameHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">العميل:</span><span style="font-weight:700;">${custName}</span></div>`;
   const custPhoneHTML = (custPhone && custPhone !== 'null' && custPhone !== '') ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">ت.العميل:</span><span style="font-weight:700;">${custPhone}</span></div>` : '';
+
+  // عنوان العميل: يظهر دائماً للدليفري أو إذا كان show_customer_address=1
+  const isDeliveryInv = inv.is_delivery || document.getElementById('isDeliveryCheck')?.checked;
+  const isExpressInv = inv.is_express || document.getElementById('isExpressCheck')?.checked;
+
+  let custAddrHTML = '';
+  try {
+    const cId = inv.customer_id || document.getElementById('customerSelect')?.value;
+    if (cId) {
+      const addrRes = await window.db.queryOne('SELECT address FROM customers WHERE id=?', [cId]);
+      const addr = addrRes?.data?.address || '';
+      if (addr && (isDeliveryInv || Number(settings.show_customer_address) === 1)) {
+        custAddrHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">العنوان:</span><span style="font-weight:700;">${addr}</span></div>`;
+      }
+    }
+  } catch(e) {}
+
+  // الطيار
+  let driverHTML = '';
+  if (isDeliveryInv) {
+    let driverName = inv.driver_name;
+    const driverSelect = document.getElementById('driverSelect');
+    if (!driverName && driverSelect && driverSelect.value) {
+      driverName = driverSelect.options[driverSelect.selectedIndex]?.text;
+    } else if (!driverName && inv.driver_id) {
+      const dRes = await window.db.queryOne('SELECT name FROM employees WHERE id=?', [inv.driver_id]);
+      driverName = dRes?.data?.name || '';
+    }
+    if (driverName && driverName !== 'اختر الطيار') {
+      driverHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الطيار:</span><span style="font-weight:700;">${driverName}</span></div>`;
+    }
+  }
+
+  const deliveryBadgeHTML = isDeliveryInv ? `<div style="text-align:center;background:#fff;color:#000;border:1.5px solid #000;border-radius:4px;padding:2px 14px;font-size:13px;font-weight:900;margin:4px auto;width:fit-content;letter-spacing:0.5px;">Delivery 🛵</div>` : '';
+  const expressBadgeHTML = isExpressInv ? `<div style="text-align:center;background:#fff;color:#000;border:1.5px solid #000;border-radius:4px;padding:2px 14px;font-size:13px;font-weight:900;margin:4px auto;width:fit-content;letter-spacing:0.5px;">Express ⚡</div>` : '';
   
   const notesStr = inv.notes || document.getElementById('invoiceNotes').value || '';
   const invoiceNotesHTML = notesStr ? `<div style="margin-top:6px;font-size:12px;font-weight:700;border:1px dashed #000;padding:4px;">ملاحظات: ${notesStr}</div>` : '';
@@ -785,8 +878,9 @@ function buildReceiptHTML(inv) {
       print-color-adjust:exact;
     ">
       ${logoHTML}
-      <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'EL-Tarzy'}</div>
-      <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:6px;">محل الترزي</div>
+      <div style="text-align:center;font-size:20px;font-weight:900;margin-bottom:4px;letter-spacing:0.5px;">${settings.company_name||'Dry Clean'}</div>
+      ${deliveryBadgeHTML}
+      ${expressBadgeHTML}
       ${addressHTML}
       ${phoneHTML}
       <div style="border-top:2px dashed #000;margin:6px 0;"></div>
@@ -794,7 +888,8 @@ function buildReceiptHTML(inv) {
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">التاريخ:</span><span style="font-weight:700;">${date}</span></div>
       ${custNameHTML}
       ${custPhoneHTML}
-      ${tailorHTML}
+      ${custAddrHTML}
+      ${driverHTML}
       <div style="border-top:2px dashed #000;margin:6px 0;"></div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;font-weight:700;table-layout:fixed;">
         <colgroup>
@@ -815,13 +910,14 @@ function buildReceiptHTML(inv) {
       </table>
       <div style="border-top:2px dashed #000;margin:6px 0;"></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">إجمالي الكمية:</span><span style="font-weight:700;">${totalQty}</span></div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الإجمالي:</span><span style="font-weight:700;">${subtotal} ${settings.currency||'جنيه'}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الإجمالي:</span><span style="font-weight:700;">${subtotal} ${settings.currency||'جنيه'}${isExpressInv ? ' (x2 إكسبريس)' : ''}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الخصم:</span><span style="font-weight:700;">${discount} ${settings.currency||'جنيه'}</span></div>
       <div style="border-top:1px solid #000;margin:4px 0;"></div>
       <div style="display:flex;justify-content:space-between;font-weight:900;font-size:16px;margin-bottom:3px;"><span>الصافي:</span><span>${net} ${settings.currency||'جنيه'}</span></div>
       <div style="border-top:1px solid #000;margin:4px 0;"></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">المدفوع:</span><span style="font-weight:700;">${paid} ${settings.currency||'جنيه'}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-weight:700;">الباقي:</span><span style="font-weight:900;">${remaining} ${settings.currency||'جنيه'}</span></div>
+      ${inv.garment_type ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;margin-top:4px;border-top:1px dashed #000;padding-top:4px;"><span style="font-weight:700;">نوع المعالجة:</span><span style="font-weight:900;">${inv.garment_type}</span></div>` : ''}
       ${invoiceNotesHTML}
       <div style="border-top:2px dashed #000;margin:8px 0;"></div>
       <div style="text-align:center;font-weight:900;font-size:13px;">${settings.receipt_footer||'شكراً لزيارتكم'}</div>
@@ -858,43 +954,227 @@ async function reversePaymentPrompt(invoiceId, amountPaid) {
   }
 }
 
+// ─── Label Modal Helpers ──────────────────────────────────────────────────────
+function onGarmentTypeChange() {
+  ['H','S','F'].forEach(t => {
+    const wrap = document.getElementById(`lbl_${t}_wrap`);
+    const radio = document.getElementById(`lbl_${t}`);
+    if (wrap && radio) {
+      wrap.style.borderColor = radio.checked ? 'var(--primary)' : 'var(--border)';
+      wrap.style.background  = radio.checked ? 'var(--accent-light)' : '';
+    }
+  });
+}
+
+// Promise-based label modal — resolves with data or null (cancel = skip label, not skip print)
+let _labelModalResolve = null;
+let _labelModalWithWhatsApp = false;
+
+function openLabelModal(withWhatsApp) {
+  // Reset state
+  document.getElementById('labelPiecesCount').value = '1';
+  document.getElementById('labelIronMark').checked = false;
+  document.querySelectorAll('input[name="labelGarmentType"]').forEach(r => { r.checked = false; });
+  ['H','S','F'].forEach(t => {
+    const wrap = document.getElementById(`lbl_${t}_wrap`);
+    if (wrap) { wrap.style.borderColor = ''; wrap.style.background = ''; }
+  });
+  _labelModalWithWhatsApp = withWhatsApp;
+  openModal('labelModal');
+  return new Promise(resolve => { _labelModalResolve = resolve; });
+}
+
+async function confirmLabelModal() {
+  const pieces = parseInt(document.getElementById('labelPiecesCount').value) || 1;
+  const garmentType = document.querySelector('input[name="labelGarmentType"]:checked')?.value || '';
+  if (!garmentType) {
+    showToast('اختر نوع المعالجة (H / S / F)', 'error');
+    return;
+  }
+  const hasIronMark = document.getElementById('labelIronMark').checked ? 1 : 0;
+  closeModal('labelModal');
+
+  // 1. طباعة الليبل فوراً على طابعة الليبل بمجرد الضغط على تأكيد وطباعة
+  try {
+    const sRes = await window.db.getSettings();
+    const sData = (sRes && sRes.success && sRes.data) ? sRes.data : settings;
+    const labelPrinter = sData.label_printer || '';
+    const labelWidth = parseInt(sData.label_width, 10) || 38;
+    const labelHeight = parseInt(sData.label_height, 10) || 35;
+
+    if (labelPrinter) {
+      const invNum = lastSavedInvoice?.invoiceNumber || lastSavedInvoice?.invoice_number || currentInvoiceNumber;
+      const totalPieces = Math.max(1, pieces);
+      const labelHTML = buildLabelHTML(invNum, garmentType, hasIronMark, totalPieces, labelWidth, labelHeight);
+
+      const printBox = document.getElementById('receiptPrint');
+      if (printBox) {
+        printBox.className = 'receipt-print';
+        printBox.innerHTML = labelHTML;
+        await new Promise(r => setTimeout(r, 150));
+
+        await window.electron.print({
+          deviceName: labelPrinter,
+          copies: totalPieces
+        });
+
+        await new Promise(r => setTimeout(r, 400));
+        printBox.innerHTML = '';
+      }
+    }
+  } catch (err) {
+    console.error('Direct label print error:', err);
+  }
+
+  if (_labelModalResolve) _labelModalResolve({ pieces, garmentType, hasIronMark });
+  _labelModalResolve = null;
+}
+
+function cancelLabelModal() {
+  closeModal('labelModal');
+  // null = skip label but still print invoice
+  if (_labelModalResolve) _labelModalResolve(null);
+  _labelModalResolve = null;
+}
+
+// SVG لوجو المكواة المطابق تماماً للصورة بجودة عالية للطباعة الحرارية
+const ironIconSVG = `
+  <svg width="34" height="18" viewBox="0 0 100 55" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;">
+    <!-- قاعدة المكواة السفلية -->
+    <polygon points="12,50 82,50 85,44 18,44" fill="#000" stroke="#000" stroke-width="1" />
+    <!-- خط فوق القاعدة -->
+    <line x1="18" y1="38" x2="85" y2="38" stroke-width="4.5" />
+    <!-- جسم المكواة المنحني -->
+    <path d="M 18 38 L 14 38 C 22 24, 42 12, 62 12 C 78 12, 85 15, 85 38 Z" stroke-width="5" />
+    <!-- كعب المقبض المائل للخلف -->
+    <line x1="84" y1="16" x2="93" y2="9" stroke-width="5" />
+    <!-- فتحة مقبض المكواة -->
+    <rect x="52" y="19" width="25" height="11" rx="5.5" stroke-width="4.5" />
+  </svg>
+`;
+
+// Build single label HTML (fits configured width & height starting from left:0)
+function buildLabelHTML(invoiceNumber, garmentType, hasIronMark, totalPieces = 1, widthMM = 38, heightMM = 35) {
+  const total = Math.max(1, parseInt(totalPieces, 10) || 1);
+  const w = parseInt(widthMM, 10) || 38;
+  const h = parseInt(heightMM, 10) || 35;
+
+  const numFontSize = h <= 25 ? 13 : (h <= 35 ? 15 : 18);
+  const garmentFontSize = h <= 25 ? 24 : (h <= 35 ? 30 : 38);
+  const botFontSize = h <= 25 ? 13 : (h <= 35 ? 15 : 17);
+  const svgW = h <= 25 ? 24 : (h <= 35 ? 28 : 34);
+  const svgH = h <= 25 ? 13 : (h <= 35 ? 15 : 18);
+
+  return `
+    <div style="
+      width: ${w}mm;
+      max-width: ${w}mm;
+      height: ${h}mm;
+      max-height: ${h}mm;
+      text-align: center;
+      margin: 0;
+      padding: 1px 2px;
+      font-family: Arial, Tahoma, sans-serif;
+      color: #000000;
+      box-sizing: border-box;
+      direction: ltr;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    ">
+      <div style="font-size:${numFontSize}px;font-weight:900;letter-spacing:0.5px;border-bottom:2px solid #000;padding-bottom:1px;text-align:center;line-height:1.1;">
+        ${invoiceNumber}
+      </div>
+      
+      <div style="font-size:${garmentFontSize}px;font-weight:900;line-height:1;margin:1px 0;text-align:center;">
+        ${garmentType}
+      </div>
+      
+      <div style="display:flex;justify-content:center;align-items:center;gap:6px;direction:rtl;line-height:1;">
+        <span style="font-size:${botFontSize}px;font-weight:900;">القطع: ${total}</span>
+        ${hasIronMark ? `
+          <svg width="${svgW}" height="${svgH}" viewBox="0 0 100 55" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;">
+            <polygon points="12,50 82,50 85,44 18,44" fill="#000" stroke="#000" stroke-width="1" />
+            <line x1="18" y1="38" x2="85" y2="38" stroke-width="4.5" />
+            <path d="M 18 38 L 14 38 C 22 24, 42 12, 62 12 C 78 12, 85 15, 85 38 Z" stroke-width="5" />
+            <line x1="84" y1="16" x2="93" y2="9" stroke-width="5" />
+            <rect x="52" y="19" width="25" height="11" rx="5.5" stroke-width="4.5" />
+          </svg>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
 function printAndReset() {
   printReceipt(false);
 }
 
-function printReceipt(withWhatsApp = false) {
+async function printReceipt(withWhatsApp = false) {
   try {
-    const inv = lastSavedInvoice || { items:invoiceItems,
-      invoice_date:document.getElementById('invoiceDate').value,
-      subtotal:parseFloat(document.getElementById('subtotalDisplay').textContent)||0,
-      discount_amount:parseFloat(document.getElementById('discountAmount').value)||0,
-      net_total:parseFloat(document.getElementById('netTotalDisplay').textContent)||0,
-      amount_paid:parseFloat(document.getElementById('amountPaid').value)||0,
-      remaining:parseFloat(document.getElementById('remainingDisplay').textContent)||0
+    const inv = lastSavedInvoice || {
+      items: invoiceItems,
+      invoice_date: document.getElementById('invoiceDate').value,
+      subtotal: parseFloat(document.getElementById('subtotalDisplay').textContent) || 0,
+      discount_amount: parseFloat(document.getElementById('discountAmount').value) || 0,
+      net_total: parseFloat(document.getElementById('netTotalDisplay').textContent) || 0,
+      amount_paid: parseFloat(document.getElementById('amountPaid').value) || 0,
+      remaining: parseFloat(document.getElementById('remainingDisplay').textContent) || 0
     };
-    const receiptHTML = buildReceiptHTML(inv);
-    
-    Swal.fire({
-      title: 'معاينة الطباعة',
+
+    // ─ Step 1: Show label modal (non-blocking). Cancel = skip label, not skip print.
+    const labelData = await openLabelModal(withWhatsApp);
+    // labelData is { pieces, garmentType, hasIronMark } or null (cancelled = skip label)
+
+    // ─ Step 2: Persist label data to DB if confirmed
+    if (labelData && lastSavedInvoice?.invoiceNumber) {
+      await window.db.run(
+        'UPDATE invoices SET pieces_count=?, garment_type=?, has_iron_mark=? WHERE invoice_number=?',
+        [labelData.pieces, labelData.garmentType, labelData.hasIronMark, lastSavedInvoice.invoiceNumber]
+      );
+      lastSavedInvoice.pieces_count  = labelData.pieces;
+      lastSavedInvoice.garment_type  = labelData.garmentType;
+      lastSavedInvoice.has_iron_mark = labelData.hasIronMark;
+    }
+
+    // ─ Step 3: Build receipt HTML (with garment type appended if we have it)
+    inv.garment_type = labelData?.garmentType || inv.garment_type || '';
+    const receiptHTML = await buildReceiptHTML(inv);
+
+    // ─ Step 4: Print invoice (show preview first)
+    const result = await Swal.fire({
+      title: 'معاينة الفاتورة',
       html: `<div style="display:flex;justify-content:center;max-height:400px;overflow-y:auto;background:#fff;padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:80mm;margin:0 auto;">${receiptHTML}</div>`,
       showCancelButton: true,
-      confirmButtonText: 'طباعة الآن',
-      cancelButtonText: 'إلغاء',
+      confirmButtonText: 'طباعة الفاتورة الآن 🧾',
+      cancelButtonText: 'تخطي طباعة الفاتورة',
       confirmButtonColor: '#3085d6',
-      cancelButtonColor: '#d33',
+      cancelButtonColor: '#6c757d',
       width: 'auto'
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        document.getElementById('receiptPrint').innerHTML = receiptHTML;
-        await new Promise(r => setTimeout(r, 120));
-        await window.electron.print();
-        await new Promise(r => setTimeout(r, 500));
-      }
-      if (withWhatsApp) {
-        await sendWhatsApp();
-      }
-      newInvoice();
     });
+
+    if (result.isConfirmed) {
+      const printBox = document.getElementById('receiptPrint');
+
+      // Fetch fresh settings directly from DB before printing
+      const sRes = await window.db.getSettings();
+      const sData = (sRes && sRes.success && sRes.data) ? sRes.data : settings;
+      const invoicePrinter = sData.invoice_printer || '';
+
+      // طباعة الفاتورة فقط على طابعة الفواتير (عرض 80mm)
+      printBox.className = 'receipt-print';
+      printBox.innerHTML = receiptHTML;
+      await new Promise(r => setTimeout(r, 150));
+      await window.electron.print(invoicePrinter ? { deviceName: invoicePrinter } : undefined);
+      await new Promise(r => setTimeout(r, 400));
+      printBox.innerHTML = '';
+    }
+
+    if (withWhatsApp) {
+      await sendWhatsApp();
+    }
+    await newInvoice();
   } catch (err) {
     alert('حدث خطأ في الطباعة: ' + err.message);
   }
@@ -922,13 +1202,27 @@ async function newInvoice() {
   recalcTotals();
   document.getElementById('discountPercent').value='0';
   document.getElementById('discountAmount').value='0';
-
   document.getElementById('amountPaid').value='0';
   document.getElementById('invoiceNotes').value='';
   document.getElementById('customerSearchInput').value='';
   document.getElementById('customerSelect').value='';
   document.getElementById('invoiceDate').value=getLocalISODate();
-  window._resumedInvoiceNumber = null; // Fix 1: clear any resumed invoice number
+  
+  // إعادة حالة الدليفري والطيار والإكسبريس
+  const delivCheck = document.getElementById('isDeliveryCheck');
+  if (delivCheck) { delivCheck.checked = false; }
+  const delivLbl = document.getElementById('deliveryLabel');
+  if (delivLbl) { delivLbl.textContent = ''; }
+  const driverField = document.getElementById('driverField');
+  if (driverField) { driverField.style.display = 'none'; }
+  const driverSelect = document.getElementById('driverSelect');
+  if (driverSelect) { driverSelect.value = ''; }
+  const expCheck = document.getElementById('isExpressCheck');
+  if (expCheck) { expCheck.checked = false; }
+  const expLbl = document.getElementById('expressLabel');
+  if (expLbl) { expLbl.textContent = ''; }
+
+  window._resumedInvoiceNumber = null;
   window._resumedPaymentMethod = null;
   closeModal('savedModal');
   const invRes = await window.db.generateInvoiceNumber();
@@ -987,9 +1281,8 @@ async function saveNewCustomer(){
   }
 
   const res = await window.db.run(
-    `INSERT INTO customers (name,phone,address,opening_balance,current_balance) VALUES (?,?,?,?,?)`,
-    [name, phoneVal, document.getElementById('nc_address').value.trim(),
-      parseFloat(document.getElementById('nc_balance').value)||0, parseFloat(document.getElementById('nc_balance').value)||0]
+    `INSERT INTO customers (name,phone,address,opening_balance,current_balance) VALUES (?,?,?,0,0)`,
+    [name, phoneVal, document.getElementById('nc_address').value.trim()]
   );
   if(res.success){
     // Update global array
@@ -1026,29 +1319,16 @@ async function openHistoryModal() {
   document.getElementById('posHistorySearch').value = '';
   if (document.getElementById('posHistoryPhone')) document.getElementById('posHistoryPhone').value = '';
 
-  // Load tailors dropdown
-  const tailorSel = document.getElementById('posHistoryTailor');
-  if (tailorSel && tailorSel.options.length <= 1) {
-    const tRes = await window.db.query('SELECT id, name FROM employees WHERE is_active=1 ORDER BY name', []);
-    if (tRes.success) {
-      let tHtml = tailorSel.innerHTML; // keep existing options (like the default one)
-      tRes.data.forEach(e => {
-        tHtml += `<option value="${e.id}">${e.name}</option>`;
-      });
-      tailorSel.innerHTML = tHtml;
-    }
-  }
-
   // جلب آخر 300 فاتورة فقط — لتجنب بطء الجلب عند كثرة الفواتير
   const res = await window.db.query(`
     SELECT i.*, 
            c.name as customer_name, 
            c.phone as customer_phone,
-           t.name as tailor_name,
+           d.name as driver_name,
            (i.net_total - COALESCE((SELECT SUM(total_returned) FROM returns WHERE original_invoice_id = i.id), 0)) as dynamic_net_total
     FROM invoices i 
     LEFT JOIN customers c ON i.customer_id = c.id
-    LEFT JOIN employees t ON i.tailor_id = t.id
+    LEFT JOIN employees d ON i.driver_id = d.id
     ORDER BY i.id DESC
     LIMIT 300
   `, []);

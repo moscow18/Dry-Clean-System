@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>EL-TARZY — نقطة البيع والفواتير</title>
+  <title>DRY CLEAN — نقطة البيع والفواتير</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <script src="../node_modules/sweetalert2/dist/sweetalert2.all.min.js"></script>
   <style>
@@ -47,7 +47,7 @@
       transition: all var(--transition);
       line-height: 1.3;
     }
-    .cat-btn:hover { background: rgba(201,168,76,0.2); color: var(--accent); border-color: var(--accent); }
+    .cat-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
     .cat-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
 
     .svc-grid {
@@ -77,7 +77,7 @@
       box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .svc-btn:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
-    .svc-btn .s-name { font-size: 11px; font-weight: 700; color: var(--text); line-height: 1.3; }
+    .svc-btn .s-name { font-size: 11px; font-weight: 700; color: var(--text-primary); line-height: 1.3; }
     .svc-btn .s-price { font-size: 11px; font-weight: 800; color: var(--success); }
 
     /* Main POS area */
@@ -258,15 +258,8 @@
     /* Receipt hidden until print */
     .receipt-print { display: none; }
     @media print {
-      html {
-        width: 72mm !important;
-        min-height: 0 !important;
-        height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-      }
-      body {
-        width: 72mm !important;
+      html, body {
+        width: 100% !important;
         min-height: 0 !important;
         height: auto !important;
         background: #fff !important;
@@ -277,15 +270,23 @@
       body > *:not(.receipt-print) { display: none !important; }
       .receipt-print {
         display: block !important;
-        position: static !important;
+        position: absolute !important;
         top: 0 !important;
-        right: 0 !important;
-        width: 72mm !important;
+        left: 0 !important;
+        width: 80mm !important;
         margin: 0 !important;
         padding: 0 !important;
         box-sizing: border-box !important;
-        direction: rtl !important;
         overflow: visible !important;
+      }
+      .receipt-print.is-label {
+        width: 30mm !important;
+        max-width: 30mm !important;
+        height: 35mm !important;
+        max-height: 35mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
       }
       @page { margin: 0; size: auto; }
     }
@@ -321,10 +322,10 @@
       <button style="background:transparent;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:20px;padding:0 6px;" onclick="goBack()" title="رجوع">←</button>
       
       <div id="posLogoContainer" class="sidebar-logo" style="margin:0; padding:0; border:none; background:transparent;">
-        <div class="logo-icon" id="posLogoIcon" style="width:36px; height:36px; font-size:18px;">T</div>
+        <div class="logo-icon" id="posLogoIcon" style="width:36px; height:36px; font-size:18px; background:var(--accent); color:#fff; border-radius:10px;">D</div>
         <div>
-          <div class="logo-text" style="font-size:16px;">EL-TARZY</div>
-          <div class="logo-sub" style="font-size:10px;">نظام إدارة محل الترزي</div>
+          <div class="logo-text" style="font-size:16px; font-weight:800;">DRY CLEAN</div>
+          <div class="logo-sub" style="font-size:10px; color:rgba(255,255,255,0.7);">نظام إدارة الدراي كلين</div>
         </div>
       </div>
 
@@ -361,11 +362,7 @@
         <select id="employeeSelect" style="min-width:140px;"></select>
       </div>
 
-      <!-- Tailor -->
-      <div class="pos-header-field" style="min-width:140px;">
-        <label>الخياط المنفذ</label>
-        <select id="tailorSelect" style="min-width:140px;"></select>
-      </div>
+
 
       <!-- Treasury (kept) -->
       <div class="pos-header-field">
@@ -375,6 +372,30 @@
           <option value="فودافون كاش">فودافون كاش</option>
           <option value="إنستا باي">إنستا باي</option>
         </select>
+      </div>
+
+      <!-- Delivery Toggle -->
+      <div class="pos-header-field" style="min-width:80px;">
+        <label>دليفري</label>
+        <div style="display:flex;align-items:center;gap:6px;height:32px;">
+          <input type="checkbox" id="isDeliveryCheck" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent);" onchange="onDeliveryToggle()" />
+          <span id="deliveryLabel" style="font-size:11px;color:rgba(255,255,255,0.7);font-weight:600;"></span>
+        </div>
+      </div>
+
+      <!-- Driver selector (shown when delivery is on) -->
+      <div class="pos-header-field" id="driverField" style="min-width:150px;display:none;">
+        <label>الطيار</label>
+        <select id="driverSelect" style="min-width:150px;"><option value="">اختر الطيار</option></select>
+      </div>
+
+      <!-- Express Toggle -->
+      <div class="pos-header-field" style="min-width:100px;">
+        <label>سريع ⚡</label>
+        <div style="display:flex;align-items:center;gap:6px;height:32px;">
+          <input type="checkbox" id="isExpressCheck" style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b;" onchange="onExpressToggle()" />
+          <span id="expressLabel" style="font-size:11px;color:#f59e0b;font-weight:700;"></span>
+        </div>
       </div>
     </div>
 
@@ -548,10 +569,7 @@
           <label class="form-label">العنوان</label>
           <input type="text" id="nc_address" class="form-control" placeholder="العنوان" />
         </div>
-        <div class="form-group">
-          <label class="form-label">الرصيد الافتتاحي (جنيه)</label>
-          <input type="number" id="nc_balance" class="form-control" placeholder="0" value="0" />
-        </div>
+        <!-- تم حذف حقل الرصيد الافتتاحي من إنشاء عميل جديد -->
       </div>
     </div>
     <div class="modal-footer">
@@ -595,9 +613,6 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input type="text" id="posHistorySearch" class="form-control" placeholder="بحث برقم الفاتورة أو اسم العميل..." oninput="filterPosHistory()" style="flex:1;min-width:160px;" />
           <input type="text" id="posHistoryPhone" class="form-control" placeholder="بحث برقم الموبايل..." oninput="filterPosHistory()" style="width:160px;" />
-          <select id="posHistoryTailor" class="form-control" onchange="filterPosHistory()" style="width:140px;">
-            <option value="">كل الخياطين</option>
-          </select>
         </div>
       </div>
       <table style="width:100%; border-collapse:collapse; text-align:right;">
@@ -605,7 +620,7 @@
           <tr>
             <th style="padding:12px; font-size:12px;">رقم الفاتورة</th>
             <th style="padding:12px; font-size:12px;">العميل</th>
-            <th style="padding:12px; font-size:12px;">الخياط</th>
+            <th style="padding:12px; font-size:12px;">الطيار</th>
             <th style="padding:12px; font-size:12px;">الإجمالي</th>
             <th style="padding:12px; font-size:12px;">التاريخ والوقت</th>
             <th style="padding:12px; font-size:12px; text-align:center;">إجراء</th>
@@ -639,6 +654,53 @@
         <tbody id="suspendedTableBody">
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- Label / Garment Info Modal -->
+<div class="modal-overlay" id="labelModal">
+  <div class="modal modal-sm" style="max-width:420px;">
+    <div class="modal-header">
+      <div class="modal-title">🏷️ بيانات الليبل</div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">عدد القطع (Pieces)</label>
+        <input type="number" id="labelPiecesCount" class="form-control" min="1" value="1" style="font-size:18px;font-weight:700;text-align:center;" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">نوع المعالجة</label>
+        <div style="display:flex;gap:10px;margin-top:8px;">
+          <label style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:2px solid var(--border);border-radius:8px;padding:12px;transition:all .15s;" id="lbl_H_wrap">
+            <input type="radio" name="labelGarmentType" id="lbl_H" value="H" style="display:none;" onchange="onGarmentTypeChange()">
+            <span style="font-size:26px;font-weight:900;">H</span>
+            <span style="font-size:11px;color:var(--text-muted);">Hang / تعليق</span>
+          </label>
+          <label style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:2px solid var(--border);border-radius:8px;padding:12px;transition:all .15s;" id="lbl_S_wrap">
+            <input type="radio" name="labelGarmentType" id="lbl_S" value="S" style="display:none;" onchange="onGarmentTypeChange()">
+            <span style="font-size:26px;font-weight:900;">S</span>
+            <span style="font-size:11px;color:var(--text-muted);">Stuff / ستاف</span>
+          </label>
+          <label style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;border:2px solid var(--border);border-radius:8px;padding:12px;transition:all .15s;" id="lbl_F_wrap">
+            <input type="radio" name="labelGarmentType" id="lbl_F" value="F" style="display:none;" onchange="onGarmentTypeChange()">
+            <span style="font-size:26px;font-weight:900;">F</span>
+            <span style="font-size:11px;color:var(--text-muted);">Fold / تطبيق</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;font-weight:600;">
+          <input type="checkbox" id="labelIronMark" style="width:20px;height:20px;cursor:pointer;" />
+          علامة مكواة (Iron Mark)
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer" style="gap:10px;">
+      <button class="btn btn-primary" id="labelConfirmBtn" onclick="confirmLabelModal()">تأكيد وطباعة ✅</button>
+      <button class="btn btn-outline" onclick="cancelLabelModal()">طباعة بدون ليبل</button>
     </div>
   </div>
 </div>

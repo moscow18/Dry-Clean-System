@@ -103,7 +103,7 @@ async function sendDailyReportAndQuit() {
 
     if (phone) {
       // ── جلب إعدادات المحل لاسم الملف ──
-      const shopName = setRes.data?.company_name || 'EL-Tarzy';
+      const shopName = setRes.data?.company_name || 'Dry Clean';
 
       // ── مسار حفظ PDF ──
       const basePath = (setRes.data?.report_save_path || '').replace(/[/\\]+$/, '');
@@ -214,3 +214,278 @@ function getLocalISODate(d = new Date()) {
     }
   } catch (e) {}
 })();
+
+// Auto-sync shop name and logo across all pages
+(async function autoSyncShopBranding() {
+  try {
+    if (!window.db || !window.db.getSettings) return;
+    const res = await window.db.getSettings();
+    if (!res || !res.success || !res.data) return;
+
+    let logoUrl = null;
+    if (res.data.logo_path) {
+      if (window.electron && window.electron.getLogoPath) {
+        logoUrl = await window.electron.getLogoPath(res.data.logo_path);
+      }
+      if (!logoUrl && res.data.logo_path) {
+        logoUrl = 'file:///' + res.data.logo_path.replace(/\\/g, '/');
+      }
+    }
+
+    const filename = res.data.logo_path ? res.data.logo_path.split(/[\\/]/).pop().toLowerCase() : '';
+    const isOldDefaultLogo = filename.includes('sewing') || filename === 'el-tarzy-logo.png';
+
+    function applyBranding() {
+      // 1. Apply Shop Name
+      if (res.data.company_name) {
+        const name = res.data.company_name.trim();
+        if (name) {
+          const navText = document.getElementById('navbarLogoText');
+          if (navText) navText.textContent = name;
+
+          const sidebarText = document.getElementById('sidebarLogoText') || document.querySelector('.sidebar-logo .logo-text');
+          if (sidebarText) sidebarText.textContent = name;
+
+          const shopFooters = document.querySelectorAll('#sidebarShopName, .sidebar-footer-shop');
+          shopFooters.forEach(el => el.textContent = name);
+        }
+      }
+
+      // 2. Apply Shop Logo Image
+      if (logoUrl && !isOldDefaultLogo) {
+        const navIcon = document.getElementById('navbarLogoIcon');
+        if (navIcon) {
+          navIcon.innerHTML = `<img src="${logoUrl}" style="width:100%; height:100%; object-fit:contain; border-radius:10px;">`;
+          navIcon.style.background = 'transparent';
+          navIcon.style.boxShadow = 'none';
+        }
+
+        const sidebarIcon = document.getElementById('sidebarLogoIcon') || document.querySelector('.sidebar-logo .logo-icon');
+        if (sidebarIcon) {
+          sidebarIcon.innerHTML = `<img src="${logoUrl}" style="width:100%; height:100%; object-fit:contain; border-radius:10px;">`;
+          sidebarIcon.style.background = 'transparent';
+          sidebarIcon.style.boxShadow = 'none';
+        }
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', applyBranding);
+    } else {
+      applyBranding();
+    }
+  } catch (e) {
+    console.warn('[Branding] Failed to sync branding:', e);
+  }
+})();
+
+
+/**
+ * فحص ومطابقة جميع أكياس الطلب عبر مسح باركود/QR كل كيس
+ * @param {number} invoiceId 
+ * @param {string} invoiceNumber 
+ * @param {string} reasonTitle 
+ * @returns {Promise<boolean>} returns true if all bags verified or no bags exist, false if cancelled
+ */
+async function verifyAllBagsScanned(invoiceId, invoiceNumber, reasonTitle = 'تأكيد الطلب') {
+  try {
+    if (!window.db || !window.db.getInvoiceBags) return true;
+
+    const bagsRes = await window.db.getInvoiceBags(invoiceId);
+    if (!bagsRes || !bagsRes.success || !bagsRes.data || bagsRes.data.length === 0) {
+      // لا توجد أكياس مسجلة لهذه الفاتورة
+      return true;
+    }
+
+    let bags = bagsRes.data;
+    const totalBags = bags.length;
+
+    // لو كل الأكياس ممسوحة مسبقاً
+    const alreadyAllScanned = bags.every(b => b.scanned_at !== null && b.scanned_at !== undefined);
+    if (alreadyAllScanned) {
+      return true;
+    }
+
+    // بناء واجهة فحص الأكياس بالـ SweetAlert2
+    return new Promise((resolve) => {
+      let currentBags = [...bags];
+
+      function renderBagsList() {
+        return currentBags.map(b => {
+          const isDone = Boolean(b.scanned_at);
+          return `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;margin-bottom:8px;border-radius:10px;border:1.5px solid ${isDone ? '#10B981' : '#E2E8F0'};background:${isDone ? '#ECFDF5' : '#F8FAFC'};font-family:'Cairo',sans-serif;">
+              <div style="text-align:right;">
+                <span style="font-weight:700;color:${isDone ? '#065F46' : '#1E293B'};">🛍️ كيس رقم ${b.bag_number} من ${totalBags}</span>
+                <div style="font-size:12px;color:#64748B;direction:ltr;text-align:right;font-family:monospace;">${b.qr_code}</div>
+              </div>
+              <div>
+                ${isDone 
+                  ? '<span style="background:#10B981;color:#fff;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">✅ تم الفحص</span>' 
+                  : '<span style="background:#F1F5F9;color:#64748B;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">⏳ في الانتظار</span>'}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function getScannedCount() {
+        return currentBags.filter(b => Boolean(b.scanned_at)).length;
+      }
+
+      Swal.fire({
+        title: `🛍️ فحص أكياس الفاتورة (${invoiceNumber})`,
+        html: `
+          <div style="font-family:'Cairo',sans-serif;text-align:right;margin-bottom:12px;">
+            <p style="color:#475569;font-size:14px;margin-bottom:14px;">
+              ${reasonTitle} — يجب مسح كود كل كيس للتأكد من عدم نسيان أو خلط أي كيس قبل المتابعة.
+            </p>
+
+            <div style="margin-bottom:14px;">
+              <input id="swalBagScanInput" type="text" placeholder="امسح باركود الكيس هنا باستخدام القارئ..." 
+                     style="width:100%;box-sizing:border-box;padding:12px 14px;border:2px solid #3B82F6;border-radius:10px;font-size:15px;direction:ltr;text-align:center;font-family:monospace;outline:none;background:#EFF6FF;" />
+              <div id="swalBagScanFeedback" style="font-size:13px;margin-top:6px;min-height:20px;font-weight:600;text-align:center;"></div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:13px;color:#334155;">
+              <span>حالة الأكياس:</span>
+              <span id="swalBagScanCounter" style="font-weight:700;color:#2563EB;">${getScannedCount()} من ${totalBags} ممسوحة</span>
+            </div>
+
+            <div id="swalBagsContainer" style="max-height:220px;overflow-y:auto;padding-right:4px;">
+              ${renderBagsList()}
+            </div>
+          </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'تأكيد واكتمال الفحص ✅',
+        cancelButtonText: 'إلغاء ❌',
+        confirmButtonColor: '#10B981',
+        cancelButtonColor: '#64748B',
+        didOpen: () => {
+          const input = document.getElementById('swalBagScanInput');
+          const feedback = document.getElementById('swalBagScanFeedback');
+          const container = document.getElementById('swalBagsContainer');
+          const counter = document.getElementById('swalBagScanCounter');
+          const confirmBtn = Swal.getConfirmButton();
+
+          function updateConfirmState() {
+            const count = getScannedCount();
+            if (counter) counter.textContent = `${count} من ${totalBags} ممسوحة`;
+            if (count === totalBags) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+            } else {
+              confirmBtn.disabled = true;
+              confirmBtn.style.opacity = '0.5';
+            }
+          }
+
+          updateConfirmState();
+
+          if (input) {
+            input.focus();
+            // إعادة التركيز دائماً عند النقر في أي مكان بالنافذة
+            const modalPopup = Swal.getPopup();
+            if (modalPopup) {
+              modalPopup.addEventListener('click', () => { input.focus(); });
+            }
+
+            async function processScannedCode(rawVal) {
+              const code = String(rawVal || '').trim();
+              input.value = '';
+              if (!code) return;
+
+              // مطابقة الكود
+              const scanRes = await window.db.confirmBagScan(code);
+              if (!scanRes.success) {
+                feedback.style.color = '#EF4444';
+                feedback.textContent = `❌ ${scanRes.error || 'كود غير صحيح'}`;
+                input.focus();
+                return;
+              }
+
+              const data = scanRes.data;
+              if (data.invoiceId !== invoiceId) {
+                feedback.style.color = '#DC2626';
+                feedback.textContent = `⚠️ تحذير: هذا الكيس ينتمي لفاتورة أخرى (${data.invoiceNumber || 'أخرى'})!`;
+                input.focus();
+                return;
+              }
+
+              // تحديث الكيس في القائمة
+              const idx = currentBags.findIndex(b => b.bag_number === data.bagNumber);
+              if (idx !== -1) {
+                currentBags[idx].scanned_at = new Date().toISOString();
+              }
+
+              container.innerHTML = renderBagsList();
+              feedback.style.color = '#10B981';
+              feedback.textContent = data.alreadyScanned 
+                ? `ℹ️ الكيس رقم ${data.bagNumber} تم فحصه مسبقاً`
+                : `✅ تم فحص كيس رقم ${data.bagNumber} بنجاح!`;
+
+              updateConfirmState();
+              input.focus();
+
+              if (getScannedCount() === totalBags) {
+                feedback.textContent = '🎉 تم فحص جميع الأكياس بنجاح!';
+                setTimeout(() => {
+                  Swal.clickConfirm();
+                }, 500);
+              }
+            }
+
+            input.addEventListener('keydown', async (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                await processScannedCode(input.value);
+              }
+            });
+          }
+        },
+        preConfirm: () => {
+          if (getScannedCount() < totalBags) {
+            Swal.showValidationMessage(`يجب مسح جميع الأكياس (${totalBags} أكياس) لإتمام العملية!`);
+            return false;
+          }
+          return true;
+        }
+      }).then((result) => {
+        if (result.isConfirmed) {
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error('Error in verifyAllBagsScanned:', err);
+    return false;
+  }
+}
+
+// ─── Global Sidebar State & Toggle ───────────────────────────────────────────
+window.toggleSidebar = function toggleSidebar() {
+  const layout = document.querySelector('.app-layout, .hr-layout, .fin-layout');
+  if (!layout) return;
+  layout.classList.toggle('sidebar-collapsed');
+  const isCollapsed = layout.classList.contains('sidebar-collapsed');
+  localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0');
+};
+
+(function initGlobalSidebar() {
+  function applySidebarState() {
+    if (localStorage.getItem('sidebar_collapsed') === '1') {
+      const layout = document.querySelector('.app-layout, .hr-layout, .fin-layout');
+      if (layout) layout.classList.add('sidebar-collapsed');
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applySidebarState);
+  } else {
+    applySidebarState();
+  }
+})();
+
